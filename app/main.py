@@ -8,7 +8,7 @@ if os.path.basename(sys.path[0]) == "app":
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import sticker, user, device
+from app.routes import sticker, user, device, auth
 from app.db.init_db import init_db
 
 app = FastAPI(title="WonderBox Backend")
@@ -23,13 +23,14 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def on_startup():
+def startup():
     init_db()
 
 
 app.include_router(sticker.router, prefix="")
 app.include_router(user.router, prefix="")
 app.include_router(device.router, prefix="")
+app.include_router(auth.router, prefix="")
 
 
 if __name__ == "__main__":

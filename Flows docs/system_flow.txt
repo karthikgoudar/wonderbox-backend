@@ -1,0 +1,66 @@
+WONDERBOX BACKEND - SYSTEM FLOWS (V1)
+=====================================
+
+1) STICKER FLOW
+---------------
+Child speaks
+  -> Device sends audio + child_id to backend
+  -> STT
+  -> Translate
+  -> Prompt generation
+  -> Image generation
+  -> Image processing
+  -> Store output (DB + cloud)
+  -> Update usage
+  -> Send notification
+  -> Print on device
+
+
+2) BUNDLE FLOW
+--------------
+Parent app
+  -> Browse bundles
+  -> Download bundle
+  -> Store in user_bundles
+  -> Open bundle
+  -> Select category
+  -> Select item
+  -> Print sticker OR play story
+
+
+3) STORY FLOW (PRE-RECORDED PLAYBACK)
+-------------------------------------
+Child speaks
+  -> STT (speech to text)
+  -> Intent parser
+       - Detect story request
+       - Detect language (en / hi / kn)
+  -> Backend selects stories for detected language
+  -> Apply non-repeating logic
+  -> Fetch scenes
+  -> Send scene sequence to device
+
+
+4) LIMITS & CONTROL FLOW (SAFETY + COST)
+----------------------------------------
+Request received
+  -> Check device paused?
+  -> Check daily usage
+  -> Check company limits
+  -> Check subscription override
+
+Decision:
+  - If allowed: proceed
+  - Else: reject
+
+
+5) FINAL SYSTEM VIEW (ALL TOGETHER)
+-----------------------------------
+Device (ESP32)
+  -> Backend (Brain)
+       - Sticker pipeline (AI)
+       - Bundle system (content)
+       - Story system (playback)
+       - Limits engine (control)
+  -> Database + Storage
+  -> Parent app (view + control)

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# SQLite databases (dev only — never commit)
+*.db
+*.sqlite3
+tmp_*.db
+
+# Storage uploads
+storage/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

@@ -1,23 +1,31 @@
-import asyncio
+import base64
 from datetime import datetime, timedelta
 import time
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 
 from app.services import stt_service, translation_service, image_service, image_processing, storage_service, notification_service, limits_service
+from app.services.analytics_service import track_event
 from app.models.device import Device
 from app.models.child import Child
 from app.models.user import User
 from app.models.sticker import Sticker
 from app.utils.constants import DEFAULT_EXPIRY_DAYS
+from app.utils.tlv_encoder import create_tlv_for_image
 
 
 async def generate_sticker(db: Session, device_id: str, audio_file: UploadFile) -> dict:
+    audio_bytes = await audio_file.read()
+    return await generate_sticker_from_audio(db=db, device_id=device_id, audio_bytes=audio_bytes)
+
+
+async def generate_sticker_from_audio(db: Session, device_id: str, audio_bytes: bytes) -> dict:
     start = time.perf_counter()
 
     # Step 1 — Fetch Device + Child + User
     device = db.query(Device).filter(Device.device_id == device_id).first()
     if not device:
+        track_event(db, "sticker.generate.failed", properties={"reason": "device_not_found", "device_id": device_id})
         raise HTTPException(status_code=404, detail="Device not found")
 
     child = None
@@ -31,11 +39,17 @@ async def generate_sticker(db: Session, device_id: str, audio_file: UploadFile) 
     limits_service.check_limits(db, device)
 
     # Step 3 — Speech to Text
-    audio_bytes = await audio_file.read()
     stt = await stt_service.transcribe(audio_bytes)
     original_text = stt.get("text")
     language = stt.get("language", "en")
     if not original_text:
+        track_event(
+            db,
+            "sticker.generate.failed",
+            user_id=getattr(user, "id", None),
+            device_id=getattr(device, "id", None),
+            properties={"reason": "stt_empty"},
+        )
         raise HTTPException(status_code=400, detail="Could not transcribe audio")
 
     # Step 4 — Translation
@@ -50,6 +64,13 @@ async def generate_sticker(db: Session, device_id: str, audio_file: UploadFile) 
     # Step 6 — Image Generation
     image_bytes = await image_service.generate_from_prompt(normalized_prompt)
     if not image_bytes:
+        track_event(
+            db,
+            "sticker.generate.failed",
+            user_id=getattr(user, "id", None),
+            device_id=getattr(device, "id", None),
+            properties={"reason": "image_generation_failed"},
+        )
         raise HTTPException(status_code=500, detail="Image generation failed")
 
     # Step 7 — Image Processing
@@ -83,6 +104,18 @@ async def generate_sticker(db: Session, device_id: str, audio_file: UploadFile) 
     note_msg = f"{child_name} imagined a {original_text} 🧠✨"
     notification_service.send_sticker_created(db, sticker, message=note_msg)
 
+    track_event(
+        db,
+        "sticker.generate.success",
+        user_id=getattr(user, "id", None),
+        device_id=getattr(device, "id", None),
+        properties={
+            "sticker_id": sticker.id,
+            "language": language,
+            "prompt_length": len(normalized_prompt),
+        },
+    )
+
     # Step 12 — Return Response
     elapsed = time.perf_counter() - start
     return {
@@ -90,5 +123,75 @@ async def generate_sticker(db: Session, device_id: str, audio_file: UploadFile) 
         "image_url": image_url,
         "prompt": normalized_prompt,
         "sticker_id": sticker.id,
+        "raw_text": original_text,
+        "language": language,
+        "processed_image_bytes": processed,
         "timings": {"elapsed_seconds": elapsed},
+    }
+
+
+async def generate_sticker_with_events(db: Session, device_id: str, audio_bytes: bytes, event_cb) -> dict:
+    """
+    Evented sticker pipeline for split submit/stream flow.
+    Emits:
+      - status(processing)
+      - text(raw transcript)
+      - image(TLV base64)
+      - done/failure handled by caller
+    """
+    # Step 1 + 2 + 3 gate checks for early failures
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    if not device.child_id:
+        raise HTTPException(status_code=400, detail="Device is not linked to a child")
+
+    child = db.query(Child).filter(Child.id == device.child_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child not found")
+
+    limits_service.check_limits(db, device)
+
+    # Step 4: tell device to start thinking animation + BGM
+    await event_cb("status", {"state": "processing"})
+
+    # Run main pipeline
+    result = await generate_sticker_from_audio(db=db, device_id=device_id, audio_bytes=audio_bytes)
+
+    # Step 6: send raw text
+    await event_cb(
+        "text",
+        {
+            "text": result.get("raw_text"),
+            "language": result.get("language"),
+        },
+    )
+
+    # Step 15: send image payload to ESP32
+    processed = result.get("processed_image_bytes", b"")
+    tlv = create_tlv_for_image(processed)
+    await event_cb(
+        "image",
+        {
+            "encoding": "base64",
+            "mime_type": "application/octet-stream",
+            "payload": base64.b64encode(tlv).decode("utf-8"),
+        },
+    )
+
+    # Step 16: pipeline complete
+    await event_cb(
+        "done",
+        {
+            "sticker_id": result.get("sticker_id"),
+            "image_url": result.get("image_url"),
+        },
+    )
+
+    return {
+        "status": "success",
+        "sticker_id": result.get("sticker_id"),
+        "image_url": result.get("image_url"),
+        "prompt": result.get("prompt"),
     }
