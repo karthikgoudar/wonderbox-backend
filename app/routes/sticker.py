@@ -1,75 +1,190 @@
+"""
+Sticker routes
+==============
+Two-step SSE architecture
+
+  POST /sticker/submit          → returns {"job_id": "..."}
+  GET  /sticker/{job_id}/stream → SSE stream of pipeline events
+
+SSE event sequence
+------------------
+  event: status       data: {"state": "processing"}
+  event: progress     data: {"step": "<named_step>"}      (repeated)
+  event: text         data: {"text": "...", "language": "en"}
+  event: image_ready  data: {"image_url": "https://..."}
+  event: done         data: {"sticker_id": "..."}
+  event: error        data: {"message": "..."}
+"""
+
 import asyncio
 import json
+import logging
+import uuid
 
-from fastapi import APIRouter, UploadFile, File, Form, Depends, Response
+from fastapi import APIRouter, File, Form, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
 
-from app.db.session import get_db
 from app.db.session import SessionLocal
-from app.services import stt_service, translation_service, image_service, image_processing, storage_service, notification_service
-from app.services.analytics_service import track_event
-from app.services.sticker_job_manager import (
+from app.models.device import Device
+from app.models.child import Child
+from app.services.sticker_orchestrator import (
     create_job,
     get_job,
-    publish_event,
-    set_done,
-    set_error,
-    set_running,
-    stream_events,
+    jobs,
+    run_sticker_pipeline,
 )
-from app.services.orchestrator.sticker_orchestrator import generate_sticker_with_events
-from app.utils.tlv_encoder import create_tlv_for_image
-from app.utils.constants import DEFAULT_EXPIRY_DAYS
-from app.models.sticker import Sticker
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# How often the SSE generator polls the job dict (seconds)
+_POLL_INTERVAL: float = 0.5
+# Maximum time to wait for a job to complete before sending a timeout error
+_STREAM_TIMEOUT: float = 120.0
 
-def _sse_format(event: str, data: dict) -> str:
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _sse(event: str, data: dict) -> str:
+    """Format a single SSE frame."""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def _run_sticker_job(job_id: str, device_id: str, audio_bytes: bytes):
+# ── Submit endpoint ───────────────────────────────────────────────────────────
+
+@router.post("/sticker/submit")
+async def submit_sticker(
+    device_id: str = Form(...),
+    child_id: str = Form(...),
+    audio: UploadFile = File(...),
+):
+    """
+    Step 1 — Accept audio and kick off the pipeline in the background.
+
+    Returns immediately with a job_id the client can use to open the SSE stream.
+    Does NOT block. Does NOT stream. Does NOT process the audio here.
+    """
+    # Quick existence check before accepting the job
     db = SessionLocal()
     try:
-        await set_running(job_id)
+        device = db.query(Device).filter(Device.device_id == device_id).first()
+        if not device:
+            return Response(
+                content=json.dumps({"detail": f"Device '{device_id}' not found"}),
+                status_code=404,
+                media_type="application/json",
+            )
 
-        async def emit(event: str, data: dict):
-            await publish_event(job_id, event, data)
-
-        result = await generate_sticker_with_events(db=db, device_id=device_id, audio_bytes=audio_bytes, event_cb=emit)
-        await set_done(job_id, result)
-    except Exception as exc:
-        status_code = getattr(exc, "status_code", 500)
-        detail = getattr(exc, "detail", str(exc))
-        await set_error(job_id, str(detail), status_code=status_code)
+        child = db.query(Child).filter(Child.id == child_id).first()
+        if not child:
+            return Response(
+                content=json.dumps({"detail": f"Child '{child_id}' not found"}),
+                status_code=404,
+                media_type="application/json",
+            )
     finally:
         db.close()
 
-
-@router.post("/sticker/submit")
-async def submit_sticker(device_id: str = Form(...), audio: UploadFile = File(...)):
     audio_bytes = await audio.read()
-    job = await create_job(device_id=device_id)
-    asyncio.create_task(_run_sticker_job(job.id, device_id, audio_bytes))
-    return {
-        "status": "accepted",
-        "job_id": job.id,
-        "stream_url": f"/sticker/{job.id}/stream",
-    }
+    job_id = str(uuid.uuid4())
+    create_job(job_id)
 
+    logger.info(f"[{job_id}] Accepted submit for device={device_id} child={child_id}")
+
+    # Fire-and-forget background task — pipeline updates jobs[job_id] as it runs
+    asyncio.create_task(
+        run_sticker_pipeline(
+            job_id=job_id,
+            audio_bytes=audio_bytes,
+            device_id=device_id,
+            child_id=child_id,
+        )
+    )
+
+    return {"job_id": job_id}
+
+
+# ── SSE stream endpoint ───────────────────────────────────────────────────────
 
 @router.get("/sticker/{job_id}/stream")
 async def stream_sticker(job_id: str):
-    job = await get_job(job_id)
-    if not job:
-        return Response(content=json.dumps({"detail": "Job not found"}), status_code=404, media_type="application/json")
+    """
+    Step 2 — Stream real-time pipeline updates over Server-Sent Events.
+
+    Polls jobs[job_id] every 0.5 s and yields new events as state changes.
+    Safe to reconnect — the stream replays all unsent events from current state.
+    Terminates when the job reaches 'done' or 'error', or after the timeout.
+    """
+    job = get_job(job_id)
+    if job is None:
+        return Response(
+            content=json.dumps({"detail": "Job not found"}),
+            status_code=404,
+            media_type="application/json",
+        )
 
     async def event_generator():
-        async for item in stream_events(job_id):
-            yield _sse_format(item["event"], item["data"])
+        sent_status = False
+        sent_text = False
+        sent_image_ready = False
+        last_progress_step: str | None = None
+        deadline = asyncio.get_event_loop().time() + _STREAM_TIMEOUT
+
+        while True:
+            current = get_job(job_id)
+
+            # Job disappeared (e.g. purged) — treat as error
+            if current is None:
+                yield _sse("error", {"message": "Job no longer exists"})
+                return
+
+            # ── status (sent once at the start) ──────────────────────────────
+            if not sent_status:
+                yield _sse("status", {"state": "processing"})
+                sent_status = True
+
+            # ── progress (sent whenever the step name changes) ────────────────
+            current_step = current.get("progress_step")
+            if current_step and current_step != last_progress_step:
+                yield _sse("progress", {"step": current_step})
+                last_progress_step = current_step
+
+            # ── text (sent once when transcript is available) ─────────────────
+            if not sent_text and current.get("text"):
+                yield _sse(
+                    "text",
+                    {
+                        "text": current["text"],
+                        "language": current.get("language", "en"),
+                    },
+                )
+                sent_text = True
+
+            # ── image_ready (sent once when image_url is available) ───────────
+            if not sent_image_ready and current.get("image_url"):
+                yield _sse("image_ready", {"image_url": current["image_url"]})
+                sent_image_ready = True
+
+            # ── terminal: done ────────────────────────────────────────────────
+            if current.get("status") == "done":
+                yield _sse("done", {"sticker_id": current.get("sticker_id")})
+                logger.info(f"[{job_id}] Stream closed — done")
+                return
+
+            # ── terminal: error ───────────────────────────────────────────────
+            if current.get("status") == "error":
+                yield _sse("error", {"message": current.get("error", "Unknown error")})
+                logger.info(f"[{job_id}] Stream closed — error: {current.get('error')}")
+                return
+
+            # ── timeout guard ─────────────────────────────────────────────────
+            if asyncio.get_event_loop().time() >= deadline:
+                jobs[job_id].update({"status": "error", "error": "timeout"})
+                yield _sse("error", {"message": "Pipeline timed out"})
+                logger.warning(f"[{job_id}] Stream timed out after {_STREAM_TIMEOUT}s")
+                return
+
+            await asyncio.sleep(_POLL_INTERVAL)
 
     return StreamingResponse(
         event_generator(),
@@ -80,47 +195,3 @@ async def stream_sticker(job_id: str):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.post("/sticker")
-async def create_sticker(device_id: str = Form(...), audio: UploadFile = File(...), db: Session = Depends(get_db)):
-    # 1. Run STT (mock)
-    audio_bytes = await audio.read()
-    stt_result = await stt_service.transcribe(audio_bytes)
-    text = stt_result.get("text")
-    lang = stt_result.get("language", "en")
-
-    # 2. Translate if needed
-    normalized = await translation_service.to_english(text, lang)
-
-    # 3. Normalize prompt (simple pass-through for now)
-    prompt = normalized
-
-    # 4. Generate image
-    image_bytes = await image_service.generate_from_prompt(prompt)
-
-    # 5. Process to 1-bit printer-ready
-    processed = await image_processing.to_1bit_png(image_bytes)
-
-    # 6. Upload to storage
-    image_url = await storage_service.upload_bytes(processed, f"stickers/{datetime.utcnow().isoformat()}.png")
-
-    # 7. Save DB record (minimal)
-    expires_at = datetime.utcnow() + timedelta(days=DEFAULT_EXPIRY_DAYS)
-    sticker = Sticker(original_text=text, normalized_prompt=prompt, language=lang, image_url=image_url, expires_at=expires_at)
-    db.add(sticker)
-    db.commit()
-    db.refresh(sticker)
-
-    track_event(
-        db,
-        "sticker.route.success",
-        properties={"sticker_id": sticker.id, "language": lang, "device_external_id": device_id},
-    )
-
-    # 8. Notify
-    notification_service.send_sticker_created(db, sticker, message=f"{sticker.id} created")
-
-    # 9. Build TLV and return binary to device
-    tlv = create_tlv_for_image(processed)
-    return Response(content=tlv, media_type="application/octet-stream")
