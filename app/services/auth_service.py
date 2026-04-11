@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -8,9 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import settings
 from app.models.user import User
+from app.infra.repositories import device_repository, user_repository
+from app.utils.security import hash_token
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -40,9 +44,27 @@ def decode_token(token: str) -> str:
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User:
-    user = db.query(User).filter(User.email == email).first()
+    user = user_repository.get_by_email(db, email)
     if not user or not user.password_hash:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not verify_password(password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return user
+
+
+def validate_device(db: Session, device_id: str, device_token: Optional[str] = None):
+    device = device_repository.get_by_device_id(db, device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    expected_token = getattr(device, "token", None)
+    if expected_token:
+        if not device_token:
+            logger.warning(f"Device token required for device {device_id}")
+            raise HTTPException(status_code=401, detail="Device token required")
+        provided_hashed_token = hash_token(device_token)
+        if expected_token != provided_hashed_token and expected_token != device_token:
+            logger.warning(f"Invalid token for device {device_id}")
+            raise HTTPException(status_code=401, detail="Invalid device token")
+
+    return device

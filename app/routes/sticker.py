@@ -21,13 +21,13 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, File, Form, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
+from app.api.dependencies import get_current_device
 from app.db.session import SessionLocal
-from app.models.device import Device
-from app.models.child import Child
-from app.services.sticker_orchestrator import (
+from app.infra.repositories import child_repository
+from app.orchestrator.sticker_orchestrator import (
     create_job,
     get_job,
     jobs,
@@ -54,9 +54,9 @@ def _sse(event: str, data: dict) -> str:
 
 @router.post("/sticker/submit")
 async def submit_sticker(
-    device_id: str = Form(...),
     child_id: str = Form(...),
     audio: UploadFile = File(...),
+    device=Depends(get_current_device),
 ):
     """
     Step 1 — Accept audio and kick off the pipeline in the background.
@@ -64,18 +64,10 @@ async def submit_sticker(
     Returns immediately with a job_id the client can use to open the SSE stream.
     Does NOT block. Does NOT stream. Does NOT process the audio here.
     """
-    # Quick existence check before accepting the job
+    # Child existence check before accepting the job
     db = SessionLocal()
     try:
-        device = db.query(Device).filter(Device.device_id == device_id).first()
-        if not device:
-            return Response(
-                content=json.dumps({"detail": f"Device '{device_id}' not found"}),
-                status_code=404,
-                media_type="application/json",
-            )
-
-        child = db.query(Child).filter(Child.id == child_id).first()
+        child = child_repository.get_by_id(db, child_id)
         if not child:
             return Response(
                 content=json.dumps({"detail": f"Child '{child_id}' not found"}),
@@ -89,14 +81,14 @@ async def submit_sticker(
     job_id = str(uuid.uuid4())
     create_job(job_id)
 
-    logger.info(f"[{job_id}] Accepted submit for device={device_id} child={child_id}")
+    logger.info(f"[{job_id}] Accepted submit for device={device.device_id} child={child_id}")
 
     # Fire-and-forget background task — pipeline updates jobs[job_id] as it runs
     asyncio.create_task(
         run_sticker_pipeline(
             job_id=job_id,
             audio_bytes=audio_bytes,
-            device_id=device_id,
+            device_id=device.device_id,
             child_id=child_id,
         )
     )
@@ -173,14 +165,29 @@ async def stream_sticker(job_id: str):
 
             # ── terminal: error ───────────────────────────────────────────────
             if current.get("status") == "error":
-                yield _sse("error", {"message": current.get("error", "Unknown error")})
+                error = current.get("error") or {}
+                if isinstance(error, dict):
+                    yield _sse(
+                        "error",
+                        {
+                            "message": error.get("message", "Unknown error"),
+                            "code": error.get("code", "UNKNOWN_ERROR"),
+                        },
+                    )
+                else:
+                    yield _sse("error", {"message": error or "Unknown error", "code": "UNKNOWN_ERROR"})
                 logger.info(f"[{job_id}] Stream closed — error: {current.get('error')}")
                 return
 
             # ── timeout guard ─────────────────────────────────────────────────
             if asyncio.get_event_loop().time() >= deadline:
-                jobs[job_id].update({"status": "error", "error": "timeout"})
-                yield _sse("error", {"message": "Pipeline timed out"})
+                jobs[job_id].update(
+                    {
+                        "status": "error",
+                        "error": {"code": "TIMEOUT", "message": "Pipeline timed out"},
+                    }
+                )
+                yield _sse("error", {"message": "Pipeline timed out", "code": "TIMEOUT"})
                 logger.warning(f"[{job_id}] Stream timed out after {_STREAM_TIMEOUT}s")
                 return
 

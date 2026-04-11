@@ -3,18 +3,25 @@ WONDERBOX BACKEND - SYSTEM FLOWS (V1)
 
 1) STICKER FLOW
 ---------------
-Child speaks
-  -> Device sends audio + child_id to backend
-  -> STT
-  -> Translate
-  -> Prompt generation
-  -> Image generation
-  -> Image processing
-  -> Store output (DB + cloud)
-  -> Update usage
-  -> Send notification
-  -> Print on device
-
+-> Child speaks
+-> Device sends audio + child_id (+ token header)
+-> Dependency validates device token + rate limit
+-> Submit returns job_id immediately
+-> Device opens SSE stream with job_id
+-> Orchestrator runs pipeline in background
+-> Limits check
+-> STT
+-> Translate (only when detected language is non-English)
+-> Prompt generation
+-> Image generation
+-> Image processing
+-> Store output (local storage path + DB)
+-> Update usage
+-> Send notification
+-> Track analytics
+-> SSE emits status/progress/text/image_ready/done OR error
+-> Error payload shape: {"message": "...", "code": "..."}
+-> Device fetches image URL and prints
 
 2) BUNDLE FLOW
 --------------
@@ -45,8 +52,8 @@ Child speaks
 ----------------------------------------
 Request received
   -> Check device paused?
-  -> Check daily usage
-  -> Check company limits
+  -> Check device daily usage
+  -> Check company daily limits
   -> Check subscription override
 
 Decision:

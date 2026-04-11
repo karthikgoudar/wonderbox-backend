@@ -1,4 +1,8 @@
+# TODO: Replace with Redis before scaling
+
 import logging
+
+from sqlalchemy import inspect, text
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +31,22 @@ from app.models.user_story_progress import UserStoryProgress
 logger = logging.getLogger(__name__)
 
 
+def _ensure_device_token_column() -> None:
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    if "devices" not in tables:
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("devices")}
+    if "token" in columns:
+        return
+
+    logger.info("Adding missing devices.token column for backward compatibility")
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE devices ADD COLUMN token VARCHAR"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_token ON devices (token)"))
+
+
 def init_db():
     """
     Initialize database.
@@ -36,6 +56,7 @@ def init_db():
 
     # Idempotent: creates only missing tables.
     Base.metadata.create_all(bind=engine)
+    _ensure_device_token_column()
 
     # Optional default data insertion for global limits.
     with Session(engine) as db:
