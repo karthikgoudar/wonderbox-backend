@@ -1,7 +1,7 @@
+# Daily limits guard for device + company totals
 from datetime import date
-from sqlalchemy import func
 from fastapi import HTTPException
-from app.models.usage import Usage
+from app.infra.repositories import usage_repository
 from app.config.settings import settings
 
 
@@ -15,13 +15,13 @@ def check_limits(db, device):
 
     # 2. device daily limit
     today = date.today()
-    usage = db.query(Usage).filter(Usage.device_id == device.id, Usage.date == today).first()
+    usage = usage_repository.get_today_by_device(db, device_pk=device.id, day=today)
     current = usage.count if usage else 0
     if device.daily_limit is not None and current >= device.daily_limit:
         raise HTTPException(status_code=429, detail="Device daily limit reached")
 
-    # 3. company limit (sum of all usages today)
-    total_today = db.query(func.coalesce(func.sum(Usage.count), 0)).filter(Usage.date == today).scalar() or 0
+    # 3. company daily limit (sum of all usages today)
+    total_today = usage_repository.get_total_for_day(db, day=today)
     if COMPANY_DAILY_LIMIT and total_today >= COMPANY_DAILY_LIMIT:
         raise HTTPException(status_code=429, detail="Company daily limit reached")
 
@@ -30,11 +30,5 @@ def check_limits(db, device):
 
 def increment_usage(db, device, amount: int = 1):
     today = date.today()
-    usage = db.query(Usage).filter(Usage.device_id == device.id, Usage.date == today).first()
-    if not usage:
-        usage = Usage(device_id=device.id, date=today, count=amount)
-        db.add(usage)
-    else:
-        usage.count = usage.count + amount
-    db.commit()
+    usage = usage_repository.increment_for_day(db, device_pk=device.id, day=today, amount=amount)
     return usage

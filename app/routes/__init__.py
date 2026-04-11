@@ -1,1 +1,1 @@
-from . import sticker, user, device
+from . import sticker, user, device, auth

@@ -1,0 +1,73 @@
+WONDERBOX BACKEND - SYSTEM FLOWS (V1)
+=====================================
+
+1) STICKER FLOW
+---------------
+-> Child speaks
+-> Device sends audio + child_id (+ token header)
+-> Dependency validates device token + rate limit
+-> Submit returns job_id immediately
+-> Device opens SSE stream with job_id
+-> Orchestrator runs pipeline in background
+-> Limits check
+-> STT
+-> Translate (only when detected language is non-English)
+-> Prompt generation
+-> Image generation
+-> Image processing
+-> Store output (local storage path + DB)
+-> Update usage
+-> Send notification
+-> Track analytics
+-> SSE emits status/progress/text/image_ready/done OR error
+-> Error payload shape: {"message": "...", "code": "..."}
+-> Device fetches image URL and prints
+
+2) BUNDLE FLOW
+--------------
+Parent app
+  -> Browse bundles
+  -> Download bundle
+  -> Store in user_bundles
+  -> Open bundle
+  -> Select category
+  -> Select item
+  -> Print sticker OR play story
+
+
+3) STORY FLOW (PRE-RECORDED PLAYBACK)
+-------------------------------------
+Child speaks
+  -> STT (speech to text)
+  -> Intent parser
+       - Detect story request
+       - Detect language (en / hi / kn)
+  -> Backend selects stories for detected language
+  -> Apply non-repeating logic
+  -> Fetch scenes
+  -> Send scene sequence to device
+
+
+4) LIMITS & CONTROL FLOW (SAFETY + COST)
+----------------------------------------
+Request received
+  -> Check device paused?
+  -> Check device daily usage
+  -> Check company daily limits
+  -> Check subscription override
+
+Decision:
+  - If allowed: proceed
+  - Else: reject
+
+
+5) FINAL SYSTEM VIEW (ALL TOGETHER)
+-----------------------------------
+Device (ESP32)
+  -> Backend (Brain)
+       - Sticker pipeline (AI)
+       - Bundle system (content)
+       - Story system (playback)
+       - Limits engine (control)
+  -> Database + Storage
+  -> Parent app (view + control)
