@@ -208,12 +208,14 @@ white background, clean lines, balanced spacing"
 - Character interactions
 
 **Example Prompts:**
-```yaml
-- "a superhero flying"
-- "a dragon breathing fire"
-- "a princess in a garden"
-- "a pirate ship sailing"
-- "a robot building blocks"
+```json
+[
+  "a superhero flying",
+  "a dragon breathing fire",
+  "a princess in a garden",
+  "a pirate ship sailing",
+  "a robot building blocks"
+]
 ```
 
 ---
@@ -226,12 +228,14 @@ white background, clean lines, balanced spacing"
 - Creative scenarios
 
 **Example Prompts:**
-```yaml
-- "an enchanted forest with fairies"
-- "a magical wizard casting spells"
-- "a detailed castle with towers and flags"
-- "a phoenix rising from flames"
-- "an underwater kingdom with mermaids"
+```json
+[
+  "an enchanted forest with fairies",
+  "a magical wizard casting spells",
+  "a detailed castle with towers and flags",
+  "a phoenix rising from flames",
+  "an underwater kingdom with mermaids"
+]
 ```
 
 ---
@@ -244,12 +248,14 @@ white background, clean lines, balanced spacing"
 - Artistic styles
 
 **Example Prompts:**
-```yaml
-- "an anime warrior with detailed armor"
-- "a gothic cathedral with intricate details"
-- "a cyberpunk cityscape"
-- "a realistic portrait of a fantasy elf"
-- "a mandala pattern with complex geometry"
+```json
+[
+  "an anime warrior with detailed armor",
+  "a gothic cathedral with intricate details",
+  "a cyberpunk cityscape",
+  "a realistic portrait of a fantasy elf",
+  "a mandala pattern with complex geometry"
+]
 ```
 
 ---
@@ -263,7 +269,7 @@ The custom prompt system works automatically:
 ```
 1. Child speaks → STT transcribes
 2. Backend identifies child and age
-3. Prompt builder checks YAML:
+3. Prompt builder checks JSON:
    - If custom prompts exist → Use random custom prompt
    - If no custom prompts → Use child's speech
 4. Age-appropriate styles added
@@ -277,10 +283,10 @@ You can control prompt behavior programmatically:
 ```python
 from app.services.prompt_builder import build_sticker_prompt
 
-# Use custom prompts from YAML (default)
+# Use custom prompts from JSON (default)
 prompt = build_sticker_prompt("child's speech", child_age=8)
 
-# Force use of speech text (ignore YAML)
+# Force use of speech text (ignore JSON)
 prompt = build_sticker_prompt(
     "child's speech", 
     child_age=8, 
@@ -332,9 +338,12 @@ prompt = build_sticker_prompt(
 
 ### Shuffle Prompts
 
-```yaml
-settings:
-  shuffle_prompts: true  # Random selection
+```json
+{
+  "settings": {
+    "shuffle_prompts": true
+  }
+}
 ```
 
 - `true`: Random prompt each time
@@ -342,9 +351,12 @@ settings:
 
 ### Max Prompts
 
-```yaml
-settings:
-  max_prompts_per_group: 50
+```json
+{
+  "settings": {
+    "max_prompts_per_group": 50
+  }
+}
 ```
 
 Limits prompts per age group (for performance).
@@ -356,7 +368,7 @@ Limits prompts per age group (for performance).
 ### Run Integration Test
 
 ```bash
-python test_yaml_prompts.py
+python test_json_prompts.py
 ```
 
 **Output shows:**
@@ -393,13 +405,13 @@ print(f"Random: {random_prompt}")
 **Check file location:**
 ```bash
 # Should be in project root
-prompts/age_based_prompts.yaml
+prompts/age_based_prompts.json
 ```
 
-**Check YAML syntax:**
+**Check JSON syntax:**
 ```bash
-# Validate YAML
-python -c "import yaml; yaml.safe_load(open('prompts/age_based_prompts.yaml'))"
+# Validate JSON
+python -c "import json; json.load(open('prompts/age_based_prompts.json'))"
 ```
 
 ### Placeholders Still Present
@@ -439,7 +451,7 @@ early_childhood:
 - Keep prompt list curated
 
 ### 4. Version Control
-- Track YAML changes in git
+- Track JSON changes in git
 - Document major updates
 - Keep backup of working versions
 
@@ -453,7 +465,7 @@ early_childhood:
 ## Migration Strategy
 
 ### Phase 1: Testing (Current)
-- YAML has placeholders
+- JSON has placeholders
 - System uses speech text
 - Test infrastructure
 
@@ -489,7 +501,7 @@ A: Start with 10-20 per age group. You can always add more.
 A: If using custom prompts, their speech is ignored. Use speech mode for creative freedom.
 
 **Q: How do I switch between modes?**  
-A: Edit the YAML file. Add prompts = custom mode. Remove prompts (placeholders) = speech mode.
+A: Edit the JSON file. Add prompts = custom mode. Remove prompts (placeholders) = speech mode.
 
 **Q: Can I reload without restarting the server?**  
 A: Yes! Call `get_prompt_loader().reload()` to hot-reload.
