@@ -12,3 +12,15 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 email-validator==2.2.0
+
+# Speech-to-Text (STT) dependencies
+# Local Whisper - runs on your server (CPU or GPU)
+faster-whisper==1.0.3  # Optimized Whisper implementation
+# For GPU support: pip install faster-whisper[cuda]
+
+# API-based STT providers (optional fallbacks)
+groq==0.11.0  # Groq API client (has free tier)
+openai==1.54.0  # OpenAI Whisper API (paid)
+
+# Image Generation dependencies
+replicate==0.34.1  # Replicate API (Flux, SDXL) - has free tier
