@@ -1,0 +1,93 @@
+{
+  "age_groups": {
+    "early_childhood": {
+      "name": "Early Childhood (3-6 years)",
+      "age_range": [3, 6],
+      "description": "Very simple, large shapes, chunky outlines for developing motor skills",
+      "prompts": [
+        "[PLACEHOLDER] Add simple prompts here (e.g., 'a big happy sun')",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]"
+      ],
+      "recommended_themes": [
+        "Simple animals (cat, dog, fish)",
+        "Basic shapes (circle, star, heart)",
+        "Familiar objects (ball, car, house)",
+        "Nature elements (tree, flower, cloud)",
+        "Food items (apple, banana, ice cream)"
+      ]
+    },
+    "middle_childhood": {
+      "name": "Middle Childhood (7-9 years)",
+      "age_range": [7, 9],
+      "description": "Moderate complexity with action and story elements",
+      "prompts": [
+        "[PLACEHOLDER] Add moderate complexity prompts (e.g., 'a superhero flying over a city')",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]"
+      ],
+      "recommended_themes": [
+        "Action scenes (heroes, adventures)",
+        "Animals with personality (smiling dinosaur, dancing bear)",
+        "Simple landscapes (beach, playground, park)",
+        "Characters doing activities (playing sports, reading)",
+        "Fantasy creatures (unicorn, dragon, fairy)"
+      ]
+    },
+    "late_childhood": {
+      "name": "Late Childhood (10-12 years)",
+      "age_range": [10, 12],
+      "description": "Detailed and intricate with creative concepts",
+      "prompts": [
+        "[PLACEHOLDER] Add detailed prompts (e.g., 'an enchanted forest with magical creatures')",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]"
+      ],
+      "recommended_themes": [
+        "Fantasy worlds (castles, magical forests)",
+        "Complex patterns (mandalas, geometric designs)",
+        "Detailed scenes (underwater world, space station)",
+        "Mythology and legends (dragons, phoenixes)",
+        "Nature with detail (butterflies, flowers with intricate petals)"
+      ]
+    },
+    "teen": {
+      "name": "Teen (12+ years)",
+      "age_range": [12, 16],
+      "description": "Complex and sophisticated with realistic details",
+      "prompts": [
+        "[PLACEHOLDER] Add sophisticated prompts (e.g., 'an anime warrior in detailed armor')",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]",
+        "[PLACEHOLDER]"
+      ],
+      "recommended_themes": [
+        "Anime/manga characters",
+        "Realistic portraits",
+        "Complex landscapes (cityscape, mountain range)",
+        "Abstract and artistic designs",
+        "Detailed fashion and accessories"
+      ]
+    }
+  },
+  "settings": {
+    "shuffle_prompts": true,
+    "fallback_prompt": "a creative and fun coloring page",
+    "max_prompts_per_group": 50
+  },
+  "_notes": [
+    "Add your custom prompts to the 'prompts' arrays above",
+    "Remove [PLACEHOLDER] entries and add real prompts",
+    "Keep prompts descriptive but concise",
+    "Focus on nouns and subjects (style modifiers added automatically)",
+    "Consider cultural diversity and inclusivity",
+    "Avoid copyrighted characters or brands"
+  ]
+}

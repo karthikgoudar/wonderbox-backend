@@ -36,6 +36,7 @@ from app.services import (
     image_processing,
     image_service,
     limits_service,
+    prompt_builder,
     stt_service,
     translation_service,
 )
@@ -321,10 +322,17 @@ async def run_sticker_pipeline(
 
         if _check_cancelled(job_id, "normalizing_prompt"):
             return
-        normalized_prompt = (
-            f"{prompt_text}, simple black and white line drawing, "
-            "bold outlines, sticker style"
-        )
+        
+        # Calculate child's age from date of birth
+        child_age = None
+        if child.date_of_birth:
+            today = datetime.now().date()
+            age_delta = today - child.date_of_birth
+            child_age = age_delta.days // 365  # Simple age calculation
+            logger.info(f"[{job_id}] Child age: {child_age} years")
+        
+        # Build age-appropriate prompt
+        normalized_prompt = prompt_builder.build_sticker_prompt(prompt_text, child_age=child_age)
         logger.info(f"[{job_id}] Prompt={normalized_prompt}")
 
         if _check_cancelled(job_id, "generating_image"):

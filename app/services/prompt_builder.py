@@ -1,17 +1,172 @@
+"""
+Prompt Builder for Age-Appropriate Sticker Generation
+======================================================
+
+Builds optimized image generation prompts based on child's age group.
+Adjusts complexity, detail level, and style to match developmental stage.
+
+Supports custom prompt templates from JSON configuration.
+"""
+
 from typing import Optional
+from app.services.prompt_loader import get_prompt_loader
 
 
-_BASE_STYLE = "simple black and white line drawing, bold outlines, sticker style"
+# Base style components
+_BASE_STYLE = "black and white line drawing, coloring book style, bold outlines"
+_BACKGROUND = "white background, clean lines"
 
 
-def build_sticker_prompt(text: str, child_age: Optional[int] = None) -> str:
-    """Build a normalized sticker prompt from raw text.
+# Age group definitions and style modifiers
+_AGE_GROUPS = {
+    "early_childhood": {
+        "range": (3, 6),
+        "name": "Early Childhood (3-6 years)",
+        "complexity": "very simple",
+        "details": "large shapes, minimal details, chunky outlines",
+        "themes": "basic familiar objects, animals, toys",
+        "line_weight": "extra thick lines",
+        "spacing": "wide spacing between elements",
+    },
+    "middle_childhood": {
+        "range": (7, 9),
+        "name": "Middle Childhood (7-9 years)",
+        "complexity": "moderate",
+        "details": "medium detail, clear distinct shapes",
+        "themes": "action scenes, characters, adventures",
+        "line_weight": "thick lines",
+        "spacing": "balanced spacing",
+    },
+    "late_childhood": {
+        "range": (10, 12),
+        "name": "Late Childhood (10-12 years)",
+        "complexity": "detailed",
+        "details": "fine details, intricate patterns, textures",
+        "themes": "creative concepts, fantasy, storytelling",
+        "line_weight": "medium lines",
+        "spacing": "compact spacing",
+    },
+    "teen": {
+        "range": (13, 99),
+        "name": "Teen (12+ years)",
+        "complexity": "complex",
+        "details": "sophisticated details, realistic proportions, shading guides",
+        "themes": "advanced concepts, manga style, detailed scenes",
+        "line_weight": "varied line weights",
+        "spacing": "dense composition",
+    },
+}
 
-    `child_age` is reserved for future style tuning.
+
+def _get_age_group(child_age: Optional[int]) -> dict:
     """
-    clean_text = (text or "").strip()
+    Determine age group based on child's age.
+    
+    Returns the age group configuration dict.
+    """
+    if child_age is None:
+        # Default to middle childhood if age not provided
+        return _AGE_GROUPS["middle_childhood"]
+    
+    for group_key, group_config in _AGE_GROUPS.items():
+        min_age, max_age = group_config["range"]
+        if min_age <= child_age <= max_age:
+            return group_config
+    
+    # Fallback to middle childhood
+    return _AGE_GROUPS["middle_childhood"]
 
-    if child_age is not None and child_age <= 6:
-        return f"{clean_text}, {_BASE_STYLE}"
 
-    return f"{clean_text}, {_BASE_STYLE}"
+def build_sticker_prompt(text: str, child_age: Optional[int] = None, use_custom_prompts: bool = True) -> str:
+    """
+    Build an age-appropriate sticker generation prompt.
+    
+    Adapts complexity and style based on child's developmental stage:
+    - 3-6 years: Very simple, large shapes, thick lines
+    - 7-9 years: Moderate detail, action scenes
+    - 10-12 years: Detailed, intricate patterns
+    - 12+ years: Complex, sophisticated details
+    
+    If custom prompts are configured in JSON, uses them instead of speech text.
+    
+    Args:
+        text: Raw text from child's speech (e.g., "a flying dragon")
+        child_age: Child's age in years (optional)
+        use_custom_prompts: Whether to use custom prompts from JSON (default: True)
+    
+    Returns:
+        Complete prompt optimized for image generation API
+    
+    Examples:
+        >>> build_sticker_prompt("a cat", child_age=4)
+        'a cat, very simple, large shapes, minimal details, chunky outlines, ...'
+        
+        >>> build_sticker_prompt("a dragon fighting a knight", child_age=11)
+        'a dragon fighting a knight, detailed, fine details, intricate patterns, ...'
+    """
+    # Try to get custom prompt from JSON configuration
+    base_text = None
+    if use_custom_prompts:
+        try:
+            loader = get_prompt_loader()
+            base_text = loader.get_random_prompt(child_age)
+        except Exception as e:
+            print(f"Error loading custom prompt: {e}")
+            base_text = None
+    
+    # Fall back to child's speech text if no custom prompt available
+    if not base_text:
+        clean_text = (text or "").strip()
+        
+        # Handle empty input
+        if not clean_text:
+            clean_text = "a simple shape"
+        
+        base_text = clean_text
+    
+    # Get age-appropriate style modifiers
+    age_group = _get_age_group(child_age)
+    
+    # Build the complete prompt with age-appropriate modifiers
+    prompt_parts = [
+        base_text,
+        age_group["complexity"],
+        age_group["details"],
+        age_group["line_weight"],
+        _BASE_STYLE,
+        _BACKGROUND,
+        age_group["spacing"],
+    ]
+    
+    # Join with commas and clean up
+    full_prompt = ", ".join(part.strip() for part in prompt_parts if part.strip())
+    
+    return full_prompt
+
+
+def get_age_group_info(child_age: Optional[int] = None) -> dict:
+    """
+    Get information about the age group for a given age.
+    
+    Useful for debugging or showing parents what style their child gets.
+    
+    Args:
+        child_age: Child's age in years
+    
+    Returns:
+        {
+            "name": "Middle Childhood (7-9 years)",
+            "range": (7, 9),
+            "complexity": "moderate",
+            "description": "Age-appropriate details"
+        }
+    """
+    age_group = _get_age_group(child_age)
+    
+    return {
+        "name": age_group["name"],
+        "range": age_group["range"],
+        "complexity": age_group["complexity"],
+        "themes": age_group["themes"],
+        "details": age_group["details"],
+    }
