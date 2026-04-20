@@ -22,7 +22,7 @@ from app.models.notification import Notification
 from app.models.usage import Usage
 from app.models.analytics_event import AnalyticsEvent
 from app.models.company_limit import CompanyLimit
-from app.models.bundle import Bundle, BundleCategory, BundleItem
+from app.models.bundle import Bundle, BundleCategory, BundleItem, BundleLevel, UserBundle, BundleItemUsage
 from app.models.preset_sticker import PresetSticker
 from app.models.story import Story, StoryScene
 from app.models.user_story_progress import UserStoryProgress
