@@ -3,10 +3,18 @@ Bundle repository
 =================
 All DB access for bundles, categories, levels, items, user downloads,
 and item-usage analytics.
+
+Design principles
+-----------------
+- Flat queries first: BundleItem always carries bundle_id, so we can
+  fetch all items for a bundle in a single query without joining.
+- Full structure uses a single query with eager loads (joinedload) so
+  SQLAlchemy emits one round-trip per relationship level, not N+1.
+- No recursive CTEs — hierarchy depth is capped at 3 (bundle/category/level).
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -20,10 +28,12 @@ from app.models.bundle import (
 )
 
 
-# ── Bundle queries ─────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Bundle queries
+# ---------------------------------------------------------------------------
 
-def get_all_published(db: Session) -> List[Bundle]:
-    """Return all published bundles (no sub-structure loaded)."""
+def get_all_bundles(db: Session) -> List[Bundle]:
+    """Return all published bundles ordered by newest first (summary, no items)."""
     return (
         db.query(Bundle)
         .filter(Bundle.is_published.is_(True))
@@ -32,8 +42,17 @@ def get_all_published(db: Session) -> List[Bundle]:
     )
 
 
-def get_by_slug(db: Session, slug: str) -> Optional[Bundle]:
-    """Return a published bundle matched by slug."""
+def get_bundle_by_id(db: Session, bundle_id: str) -> Optional[Bundle]:
+    """Return a single published bundle by UUID."""
+    return (
+        db.query(Bundle)
+        .filter(Bundle.id == bundle_id, Bundle.is_published.is_(True))
+        .first()
+    )
+
+
+def get_bundle_by_slug(db: Session, slug: str) -> Optional[Bundle]:
+    """Return a single published bundle by URL slug."""
     return (
         db.query(Bundle)
         .filter(Bundle.slug == slug, Bundle.is_published.is_(True))
@@ -41,12 +60,20 @@ def get_by_slug(db: Session, slug: str) -> Optional[Bundle]:
     )
 
 
-def get_full_structure(db: Session, slug: str) -> Optional[Bundle]:
+def get_full_bundle_structure(db: Session, bundle_id: str) -> Optional[Bundle]:
     """
-    Return a published bundle with its full hierarchy eagerly loaded:
-      bundle → categories → levels → items
-                          ↘ items (direct-on-category)
-             ↘ items (direct-on-bundle)
+    Return a published bundle with its complete hierarchy eagerly loaded
+    in the minimum number of SQL round-trips:
+
+      Bundle
+        └─ BundleCategory (ordered)
+             └─ BundleLevel   (ordered)
+                  └─ BundleItem (ordered)
+             └─ BundleItem (direct on category, ordered)
+        └─ BundleItem (direct on bundle — no category, no level)
+
+    The caller receives a single ORM object; Pydantic serialisation
+    (BundleResponse / NestedBundleResponse) handles flattening.
     """
     return (
         db.query(Bundle)
@@ -56,25 +83,29 @@ def get_full_structure(db: Session, slug: str) -> Optional[Bundle]:
             .joinedload(BundleLevel.items),
             joinedload(Bundle.categories)
             .joinedload(BundleCategory.items),
+            joinedload(Bundle.all_items),
         )
-        .filter(Bundle.slug == slug, Bundle.is_published.is_(True))
+        .filter(Bundle.id == bundle_id, Bundle.is_published.is_(True))
         .first()
     )
 
 
-# ── Category / Level / Item helpers ───────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Item queries (flat — no joins needed because bundle_id is denormalised)
+# ---------------------------------------------------------------------------
 
-def get_items_in_level(db: Session, level_id: str) -> List[BundleItem]:
+def get_items_by_bundle(db: Session, bundle_id: str) -> List[BundleItem]:
+    """All items that belong to this bundle at any depth."""
     return (
         db.query(BundleItem)
-        .filter(BundleItem.level_id == level_id)
+        .filter(BundleItem.bundle_id == bundle_id)
         .order_by(BundleItem.order_index)
         .all()
     )
 
 
-def get_items_direct_in_category(db: Session, category_id: str) -> List[BundleItem]:
-    """Items that live directly under a category (no level)."""
+def get_items_by_category(db: Session, category_id: str) -> List[BundleItem]:
+    """Items that live directly under a category (no level assigned)."""
     return (
         db.query(BundleItem)
         .filter(
@@ -86,23 +117,22 @@ def get_items_direct_in_category(db: Session, category_id: str) -> List[BundleIt
     )
 
 
-def get_items_direct_in_bundle(db: Session, bundle_id: str) -> List[BundleItem]:
-    """Items that live directly under a bundle (no category, no level)."""
+def get_items_by_level(db: Session, level_id: str) -> List[BundleItem]:
+    """Items that belong to a specific level."""
     return (
         db.query(BundleItem)
-        .filter(
-            BundleItem.bundle_id == bundle_id,
-            BundleItem.category_id.is_(None),
-            BundleItem.level_id.is_(None),
-        )
+        .filter(BundleItem.level_id == level_id)
         .order_by(BundleItem.order_index)
         .all()
     )
 
 
-# ── User download tracking ─────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# User download tracking
+# ---------------------------------------------------------------------------
 
 def get_user_bundles(db: Session, user_id: int) -> List[UserBundle]:
+    """Return all UserBundle records for a user, newest download first."""
     return (
         db.query(UserBundle)
         .filter(UserBundle.user_id == user_id)
@@ -119,10 +149,16 @@ def get_user_bundle(db: Session, user_id: int, bundle_id: str) -> Optional[UserB
     )
 
 
-def mark_downloaded(db: Session, user_id: int, bundle_id: str, version: int) -> UserBundle:
+def mark_downloaded(
+    db: Session,
+    user_id: int,
+    bundle_id: str,
+    version: int,
+    local_path: Optional[str] = None,
+) -> UserBundle:
     """
-    Upsert a UserBundle row marking the bundle as downloaded for the user.
-    Returns the UserBundle record.
+    Upsert a UserBundle row — creates it on first download, updates it on
+    re-download (e.g. new bundle version).
     """
     record = get_user_bundle(db, user_id, bundle_id)
     now = datetime.utcnow()
@@ -130,43 +166,37 @@ def mark_downloaded(db: Session, user_id: int, bundle_id: str, version: int) -> 
         record = UserBundle(
             user_id=user_id,
             bundle_id=bundle_id,
-            downloaded_version=version,
-            is_downloaded=True,
+            version=version,
+            local_path=local_path,
             downloaded_at=now,
-            last_opened_at=now,
         )
         db.add(record)
     else:
-        record.downloaded_version = version
-        record.is_downloaded = True
+        record.version = version
+        record.local_path = local_path or record.local_path
         record.downloaded_at = now
-        record.last_opened_at = now
     db.commit()
     db.refresh(record)
     return record
 
 
-def update_last_opened(db: Session, user_id: int, bundle_id: str) -> Optional[UserBundle]:
-    record = get_user_bundle(db, user_id, bundle_id)
-    if record:
-        record.last_opened_at = datetime.utcnow()
-        db.commit()
-        db.refresh(record)
-    return record
-
-
-# ── Usage analytics ────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Usage analytics
+# ---------------------------------------------------------------------------
 
 def track_item_usage(
     db: Session,
     item_id: str,
+    action: str = "use",
     user_id: Optional[int] = None,
     device_id: Optional[int] = None,
 ) -> BundleItemUsage:
+    """Append one usage event. action should be 'print', 'play', or 'use'."""
     record = BundleItemUsage(
         item_id=item_id,
         user_id=user_id,
         device_id=device_id,
+        action=action,
     )
     db.add(record)
     db.commit()
