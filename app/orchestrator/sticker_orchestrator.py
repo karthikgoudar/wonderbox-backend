@@ -302,9 +302,9 @@ async def run_sticker_pipeline(
         _update(job_id, text=original_text, language=language)
         logger.info(f"[{job_id}] Transcript='{original_text}' language={language}")
 
-        if _check_cancelled(job_id, "translating"):
-            return
-        _update(job_id, progress_step="translating")
+        # if _check_cancelled(job_id, "translating"):
+           # return
+        # _update(job_id, progress_step="translating")
         # if language and not language.startswith("en"):
             # logger.info(f"[{job_id}] Translating from {language} to English")
             # try:
