@@ -1,0 +1,65 @@
+{
+  "age_groups": {
+    "early_childhood": {
+      "name": "Early Childhood (3-6 years)",
+      "age_range": [3, 6],
+      "description": "Very simple, large shapes, chunky outlines for developing motor skills",
+      "context_prefix": "[ADD YOUR CONTEXT HERE - will be prepended to child's speech]",
+      "example": "If child says 'a cat', prompt becomes: '[YOUR CONTEXT] a cat'",
+      "recommended_context": [
+        "simple and cute",
+        "big and friendly",
+        "happy and colorful"
+      ]
+    },
+    "middle_childhood": {
+      "name": "Middle Childhood (7-9 years)",
+      "age_range": [7, 9],
+      "description": "Moderate complexity with action and story elements",
+      "context_prefix": "[ADD YOUR CONTEXT HERE - will be prepended to child's speech]",
+      "example": "If child says 'a dragon', prompt becomes: '[YOUR CONTEXT] a dragon'",
+      "recommended_context": [
+        "exciting and adventurous",
+        "action-packed",
+        "dynamic and fun"
+      ]
+    },
+    "late_childhood": {
+      "name": "Late Childhood (10-12 years)",
+      "age_range": [10, 12],
+      "description": "Detailed and intricate with creative concepts",
+      "context_prefix": "[ADD YOUR CONTEXT HERE - will be prepended to child's speech]",
+      "example": "If child says 'a wizard', prompt becomes: '[YOUR CONTEXT] a wizard'",
+      "recommended_context": [
+        "detailed and magical",
+        "intricate and creative",
+        "fantasy-inspired"
+      ]
+    },
+    "teen": {
+      "name": "Teen (12+ years)",
+      "age_range": [12, 16],
+      "description": "Complex and sophisticated with realistic details",
+      "context_prefix": "[ADD YOUR CONTEXT HERE - will be prepended to child's speech]",
+      "example": "If child says 'a warrior', prompt becomes: '[YOUR CONTEXT] a warrior'",
+      "recommended_context": [
+        "highly detailed and complex",
+        "sophisticated and artistic",
+        "anime-style"
+      ]
+    }
+  },
+  "settings": {
+    "enable_context_prefix": true,
+    "fallback_prefix": ""
+  },
+  "_notes": [
+    "CONTEXT PREFIX SYSTEM:",
+    "- Add age-appropriate context to 'context_prefix' field",
+    "- This context is PREPENDED to whatever the child says",
+    "- Example: context='cute' + child says 'dog' = 'cute dog'",
+    "- Leave as [ADD YOUR CONTEXT HERE] to disable (uses only child's speech)",
+    "- Keep context short - 1-3 words that add flavor/style",
+    "- The system automatically adds technical style modifiers (line weight, etc)"
+  ]
+}

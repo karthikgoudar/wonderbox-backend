@@ -36,6 +36,7 @@ from app.services import (
     image_processing,
     image_service,
     limits_service,
+    prompt_builder,
     stt_service,
     translation_service,
 )
@@ -295,36 +296,43 @@ async def run_sticker_pipeline(
             logger.warning(f"[{job_id}] STT returned empty transcript")
             _set_error(job_id, "STT_FAILED", "Could not transcribe audio")
             return
-
+        
+        prompt_text = original_text
+        
         _update(job_id, text=original_text, language=language)
         logger.info(f"[{job_id}] Transcript='{original_text}' language={language}")
 
-        if _check_cancelled(job_id, "translating"):
-            return
-        _update(job_id, progress_step="translating")
-        if language and not language.startswith("en"):
-            logger.info(f"[{job_id}] Translating from {language} to English")
-            try:
-                prompt_text = await _run_with_retry(
-                    job_id=job_id,
-                    step_name="translation",
-                    timeout=TRANSLATION_TIMEOUT_SECONDS,
-                    operation=lambda: translation_service.to_english(original_text, language),
-                    failure_code="TRANSLATION_FAILED",
-                    failure_message="Translation failed",
-                )
-            except PipelineError as exc:
-                _set_error(job_id, exc.code, exc.message)
-                return
-        else:
-            prompt_text = original_text
+        # if _check_cancelled(job_id, "translating"):
+           # return
+        # _update(job_id, progress_step="translating")
+        # if language and not language.startswith("en"):
+            # logger.info(f"[{job_id}] Translating from {language} to English")
+            # try:
+                # prompt_text = await _run_with_retry(
+                  # job_id=job_id,
+                    # step_name="translation",
+                    # timeout=TRANSLATION_TIMEOUT_SECONDS,
+                    # operation=lambda: translation_service.to_english(original_text, language),
+                    # failure_code="TRANSLATION_FAILED",
+                    # failure_message="Translation failed",
+                #)
+            # except PipelineError as exc:
+               # _set_error(job_id, exc.code, exc.message)
+                # return
 
         if _check_cancelled(job_id, "normalizing_prompt"):
             return
-        normalized_prompt = (
-            f"{prompt_text}, simple black and white line drawing, "
-            "bold outlines, sticker style"
-        )
+        
+        # Calculate child's age from date of birth
+        child_age = None
+        if child.date_of_birth:
+            today = datetime.now().date()
+            age_delta = today - child.date_of_birth
+            child_age = age_delta.days // 365  # Simple age calculation
+            logger.info(f"[{job_id}] Child age: {child_age} years")
+        
+        # Build age-appropriate prompt
+        normalized_prompt = prompt_builder.build_sticker_prompt(prompt_text, child_age=child_age)
         logger.info(f"[{job_id}] Prompt={normalized_prompt}")
 
         if _check_cancelled(job_id, "generating_image"):
@@ -351,27 +359,27 @@ async def run_sticker_pipeline(
 
         if _check_cancelled(job_id, "processing_image"):
             return
-        logger.info(f"[{job_id}] Processing image")
-        _update(job_id, progress_step="processing_image")
-        try:
-            processed = await _run_with_timeout(
-                job_id=job_id,
-                step_name="image_processing",
-                timeout=IMAGE_PROCESSING_TIMEOUT_SECONDS,
-                operation=lambda: image_processing.to_1bit_png(image_bytes),
-            )
-        except PipelineError as exc:
-            _set_error(job_id, exc.code, exc.message)
-            return
-        except Exception as exc:
-            logger.warning(f"[{job_id}] Image processing failed error={exc}")
-            _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
-            return
+        # logger.info(f"[{job_id}] Processing image")
+        # _update(job_id, progress_step="processing_image")
+        # try:
+        #     processed = await _run_with_timeout(
+        #         job_id=job_id,
+        #         step_name="image_processing",
+        #         timeout=IMAGE_PROCESSING_TIMEOUT_SECONDS,
+        #         operation=lambda: image_processing.to_1bit_png(image_bytes),
+        #     )
+        # except PipelineError as exc:
+        #     _set_error(job_id, exc.code, exc.message)
+        #     return
+        # except Exception as exc:
+        #     logger.warning(f"[{job_id}] Image processing failed error={exc}")
+        #     _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
+        #     return
 
-        if not processed:
-            logger.warning(f"[{job_id}] Image processing returned empty bytes")
-            _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
-            return
+        # if not processed:
+        #     logger.warning(f"[{job_id}] Image processing returned empty bytes")
+        #     _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
+        #     return
 
         if _check_cancelled(job_id, "uploading"):
             return
@@ -383,7 +391,7 @@ async def run_sticker_pipeline(
                 job_id=job_id,
                 step_name="upload",
                 timeout=UPLOAD_TIMEOUT_SECONDS,
-                operation=lambda: storage_service.upload_bytes(processed, filename),
+                operation=lambda: storage_service.upload_bytes(image_bytes, filename),
                 failure_code="UPLOAD_FAILED",
                 failure_message="Image upload failed",
             )
