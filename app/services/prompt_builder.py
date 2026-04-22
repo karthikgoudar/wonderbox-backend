@@ -77,7 +77,7 @@ def _get_age_group(child_age: Optional[int]) -> dict:
     return _AGE_GROUPS["middle_childhood"]
 
 
-def build_sticker_prompt(text: str, child_age: Optional[int] = None, use_custom_prompts: bool = True) -> str:
+def build_sticker_prompt(text: str, child_age: Optional[int] = None, use_context_prefix: bool = True) -> str:
     """
     Build an age-appropriate sticker generation prompt.
     
@@ -87,41 +87,44 @@ def build_sticker_prompt(text: str, child_age: Optional[int] = None, use_custom_
     - 10-12 years: Detailed, intricate patterns
     - 12+ years: Complex, sophisticated details
     
-    If custom prompts are configured in JSON, uses them instead of speech text.
+    If context prefix is configured in JSON, it's prepended to child's speech.
     
     Args:
         text: Raw text from child's speech (e.g., "a flying dragon")
         child_age: Child's age in years (optional)
-        use_custom_prompts: Whether to use custom prompts from JSON (default: True)
+        use_context_prefix: Whether to use context prefix from JSON (default: True)
     
     Returns:
         Complete prompt optimized for image generation API
     
     Examples:
         >>> build_sticker_prompt("a cat", child_age=4)
-        'a cat, very simple, large shapes, minimal details, chunky outlines, ...'
+        'simple and cute a cat, very simple, large shapes, minimal details, ...'
         
         >>> build_sticker_prompt("a dragon fighting a knight", child_age=11)
-        'a dragon fighting a knight, detailed, fine details, intricate patterns, ...'
+        'detailed and magical a dragon fighting a knight, detailed, fine details, ...'
     """
-    # Try to get custom prompt from JSON configuration
-    base_text = None
-    if use_custom_prompts:
+    # Start with child's speech text
+    clean_text = (text or "").strip()
+    
+    # Handle empty input
+    if not clean_text:
+        clean_text = "a simple shape"
+    
+    # Try to get context prefix from JSON configuration
+    context = None
+    if use_context_prefix:
         try:
             loader = get_prompt_loader()
-            base_text = loader.get_random_prompt(child_age)
+            context = loader.get_context_prefix(child_age)
         except Exception as e:
-            print(f"Error loading custom prompt: {e}")
-            base_text = None
+            print(f"Error loading context prefix: {e}")
+            context = None
     
-    # Fall back to child's speech text if no custom prompt available
-    if not base_text:
-        clean_text = (text or "").strip()
-        
-        # Handle empty input
-        if not clean_text:
-            clean_text = "a simple shape"
-        
+    # Prepend context to child's speech if available
+    if context:
+        base_text = f"{context} {clean_text}"
+    else:
         base_text = clean_text
     
     # Get age-appropriate style modifiers

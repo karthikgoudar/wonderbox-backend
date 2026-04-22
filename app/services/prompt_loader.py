@@ -2,18 +2,17 @@
 Prompt Loader Service
 =====================
 
-Loads custom prompts from JSON configuration file.
-Provides random selection from age-appropriate prompt collections.
+Loads age-appropriate context prefixes from JSON configuration.
+These prefixes are prepended to child's speech to add age-appropriate flavor.
 """
 
 import json
-import random
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 
 
 class PromptLoader:
-    """Loads and manages age-based prompts from JSON configuration."""
+    """Loads and manages age-based context prefixes from JSON configuration."""
     
     def __init__(self, prompts_file: str = "prompts/age_based_prompts.json"):
         """
@@ -24,7 +23,7 @@ class PromptLoader:
         """
         self.prompts_file = prompts_file
         self._prompts_data: Optional[Dict] = None
-        self._load_prompts()
+        self._loaded = False  # Track if we've attempted to load
     
     def _get_project_root(self) -> Path:
         """Get the project root directory (where prompts/ folder is)."""
@@ -33,8 +32,13 @@ class PromptLoader:
         # Go up from app/services/ to root
         return current_file.parent.parent.parent
     
-    def _load_prompts(self):
-        """Load prompts from JSON file."""
+    def _ensure_loaded(self):
+        """Lazy load prompts from JSON file (only once)."""
+        if self._loaded:
+            return  # Already loaded (or attempted to load)
+        
+        self._loaded = True  # Mark as loaded to prevent re-loading
+        
         try:
             project_root = self._get_project_root()
             json_path = project_root / self.prompts_file
@@ -53,20 +57,16 @@ class PromptLoader:
             print(f"Error loading prompts file: {e}")
             self._prompts_data = None
     
-    def _is_placeholder(self, prompt: str) -> bool:
-        """Check if a prompt is a placeholder."""
-        if not prompt:
-            return True
-        prompt_lower = prompt.lower().strip()
-        return (
-            "[placeholder]" in prompt_lower or
-            prompt_lower.startswith("[") and prompt_lower.endswith("]") or
-            len(prompt_lower) < 5
+    def _is_valid_context(self, context: str) -> bool:
+        """Check if a context prefix is valid (not a placeholder)."""
+        if not context:
+            return False
+        context_lower = context.lower().strip()
+        return not (
+            "[add your context" in context_lower or
+            "[placeholder]" in context_lower or
+            context_lower.startswith("[") and context_lower.endswith("]")
         )
-    
-    def _filter_placeholders(self, prompts: List[str]) -> List[str]:
-        """Remove placeholder prompts from list."""
-        return [p for p in prompts if not self._is_placeholder(p)]
     
     def _get_age_group_key(self, child_age: Optional[int]) -> str:
         """Map child age to age group key."""
@@ -82,17 +82,31 @@ class PromptLoader:
         else:
             return "teen"
     
-    def get_random_prompt(self, child_age: Optional[int] = None) -> Optional[str]:
+    def get_context_prefix(self, child_age: Optional[int] = None) -> Optional[str]:
         """
-        Get a random prompt for the given age group.
+        Get the context prefix for the given age group.
+        
+        This prefix gets prepended to the child speech to add age-appropriate flavor.
         
         Args:
-            child_age: Child's age in years
+            child_age: Child age in years
         
         Returns:
-            Random prompt string, or None if no prompts available
+            Context prefix string, or None if not configured
+            
+        Examples:
+            loader.get_context_prefix(5) returns 'simple and cute'
+            Child says "a dragon"
+            Final prompt: "simple and cute a dragon" + style modifiers
         """
+        self._ensure_loaded()  # Lazy load on first access
+        
         if not self._prompts_data:
+            return None
+        
+        # Check if context prefix is enabled
+        settings = self._prompts_data.get("settings", {})
+        if not settings.get("enable_context_prefix", True):
             return None
         
         age_group_key = self._get_age_group_key(child_age)
@@ -100,66 +114,22 @@ class PromptLoader:
         try:
             age_groups = self._prompts_data.get("age_groups", {})
             age_group_data = age_groups.get(age_group_key, {})
-            prompts = age_group_data.get("prompts", [])
+            context = age_group_data.get("context_prefix", "")
             
-            # Filter out placeholders
-            valid_prompts = self._filter_placeholders(prompts)
-            
-            if not valid_prompts:
-                return None
-            
-            # Check shuffle setting
-            settings = self._prompts_data.get("settings", {})
-            if settings.get("shuffle_prompts", True):
-                return random.choice(valid_prompts)
+            # Check if context is valid (not a placeholder)
+            if self._is_valid_context(context):
+                return context.strip()
             else:
-                return valid_prompts[0]
+                return None
         
         except Exception as e:
-            print(f"Error getting random prompt: {e}")
+            print(f"Error getting context prefix: {e}")
             return None
-    
-    def get_all_prompts(self, child_age: Optional[int] = None) -> List[str]:
-        """
-        Get all prompts for the given age group.
-        
-        Args:
-            child_age: Child's age in years
-        
-        Returns:
-            List of prompts (excluding placeholders)
-        """
-        if not self._prompts_data:
-            return []
-        
-        age_group_key = self._get_age_group_key(child_age)
-        
-        try:
-            age_groups = self._prompts_data.get("age_groups", {})
-            age_group_data = age_groups.get(age_group_key, {})
-            prompts = age_group_data.get("prompts", [])
-            
-            return self._filter_placeholders(prompts)
-        
-        except Exception as e:
-            print(f"Error getting prompts: {e}")
-            return []
-    
-    def has_valid_prompts(self, child_age: Optional[int] = None) -> bool:
-        """
-        Check if there are valid (non-placeholder) prompts for age group.
-        
-        Args:
-            child_age: Child's age in years
-        
-        Returns:
-            True if valid prompts exist
-        """
-        return len(self.get_all_prompts(child_age)) > 0
     
     def reload(self):
         """Reload prompts from JSON file (useful for hot-reloading config)."""
-        self._load_prompts()
+        self._loaded = False  # Reset loaded flag
+        self._ensure_loaded()  # Force reload
 
 
 # Global instance (singleton pattern)
@@ -174,3 +144,4 @@ def get_prompt_loader() -> PromptLoader:
         _prompt_loader_instance = PromptLoader()
     
     return _prompt_loader_instance
+
