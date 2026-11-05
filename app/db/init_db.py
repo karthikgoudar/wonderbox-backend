@@ -47,6 +47,36 @@ def _ensure_device_token_column() -> None:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_token ON devices (token)"))
 
 
+def _ensure_story_scene_columns() -> None:
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    if "story_scenes" not in tables:
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("story_scenes")}
+    if "print_url" in columns:
+        return
+
+    logger.info("Adding missing story_scenes.print_url column")
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE story_scenes ADD COLUMN print_url VARCHAR"))
+
+
+def _ensure_sticker_columns() -> None:
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    if "stickers" not in tables:
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("stickers")}
+    if "print_url" in columns:
+        return
+
+    logger.info("Adding missing stickers.print_url column")
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE stickers ADD COLUMN print_url VARCHAR"))
+
+
 def init_db():
     """
     Initialize database.
@@ -57,6 +87,8 @@ def init_db():
     # Idempotent: creates only missing tables.
     Base.metadata.create_all(bind=engine)
     _ensure_device_token_column()
+    _ensure_story_scene_columns()
+    _ensure_sticker_columns()
 
     # Optional default data insertion for global limits.
     with Session(engine) as db:
@@ -64,5 +96,9 @@ def init_db():
         if not has_limits:
             db.add(CompanyLimit(free_daily_limit=5, free_monthly_limit=100))
             db.commit()
+
+        if db.query(Story).count() == 0:
+            from app.db.seed_stories import seed_stories
+            seed_stories()
 
     logger.info("Database initialized successfully")

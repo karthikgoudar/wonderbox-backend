@@ -16,10 +16,10 @@ def get_db():
 
 
 def get_current_device(
-    device_id: str = Form(...),
+    device_id: Optional[str] = Form(default=None),
     x_device_token: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    device = auth_service.validate_device(db, device_id, x_device_token)
+    device = auth_service.validate_device(db, device_id=device_id, device_token=x_device_token)
     rate_limit_service.check_rate_limit(device.device_id)
     return device

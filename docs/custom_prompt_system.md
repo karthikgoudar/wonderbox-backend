@@ -276,7 +276,7 @@ The custom prompt system works automatically:
 5. Image generated
 ```
 
-### Programmatic Control
+### Programatic Control
 
 You can control prompt behavior programmatically:
 

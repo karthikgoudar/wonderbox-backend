@@ -151,8 +151,8 @@ The age-appropriate prompt generation is **automatic** in the sticker pipeline:
 1. Child speaks → Device sends audio + child_id
 2. Backend validates child + calculates age from date_of_birth
 3. STT converts speech to text: "a flying dragon"
-4. Prompt builder creates age-appropriate prompt
-5. Image API generates coloring book image
+4. Prompt builder (API Internal) creates age-appropriate prompt
+5. Image API (External/Internal) generates coloring book image
 6. Device receives age-appropriate sticker
 ```
 

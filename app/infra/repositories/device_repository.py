@@ -8,14 +8,25 @@ def _prepare_token(device_data: dict) -> dict:
 
     if not raw_token:
         raw_token = generate_device_token()
-
-    payload["token"] = hash_token(raw_token)
-    payload["raw_token"] = raw_token
+        payload["token"] = hash_token(raw_token)
+        payload["raw_token"] = raw_token
+    else:
+        # If already a 64-char hex string (already hashed), don't double-hash
+        if len(raw_token) == 64 and all(c in "0123456789abcdefABCDEF" for c in raw_token):
+            payload["token"] = raw_token.lower()
+            payload["raw_token"] = payload.get("raw_token", raw_token)
+        else:
+            payload["token"] = hash_token(raw_token)
+            payload["raw_token"] = raw_token
     return payload
 
 
 def get_by_device_id(db, device_id: str):
     return db.query(Device).filter(Device.device_id == device_id).first()
+
+
+def get_by_token(db, token: str):
+    return db.query(Device).filter(Device.token == token).first()
 
 
 def get_by_id(db, device_pk: int):

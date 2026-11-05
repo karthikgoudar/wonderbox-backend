@@ -75,6 +75,8 @@ def create_job(job_id: str) -> dict:
         "text": None,
         "language": None,
         "image_url": None,
+        "print_url": None,
+        "print_png_url": None,
         "sticker_id": None,
         "error": None,
         "created_at": time.time(),
@@ -249,12 +251,15 @@ async def run_sticker_pipeline(
             _set_error(job_id, "CHILD_NOT_FOUND", "Child not found")
             return
 
-        if device.child_id != child.id:
+        if device.child_id is not None and device.child_id != child.id:
             logger.warning(
                 f"[{job_id}] Child mismatch device_child_id={device.child_id} requested_child_id={child.id}"
             )
             _set_error(job_id, "CHILD_MISMATCH", "Child mismatch")
             return
+        elif device.child_id is None:
+            device.child_id = child.id
+            db.commit()
 
         user = None
         if device.parent_id:
@@ -359,48 +364,70 @@ async def run_sticker_pipeline(
 
         if _check_cancelled(job_id, "processing_image"):
             return
-        # logger.info(f"[{job_id}] Processing image")
-        # _update(job_id, progress_step="processing_image")
-        # try:
-        #     processed = await _run_with_timeout(
-        #         job_id=job_id,
-        #         step_name="image_processing",
-        #         timeout=IMAGE_PROCESSING_TIMEOUT_SECONDS,
-        #         operation=lambda: image_processing.to_1bit_png(image_bytes),
-        #     )
-        # except PipelineError as exc:
-        #     _set_error(job_id, exc.code, exc.message)
-        #     return
-        # except Exception as exc:
-        #     logger.warning(f"[{job_id}] Image processing failed error={exc}")
-        #     _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
-        #     return
-
-        # if not processed:
-        #     logger.warning(f"[{job_id}] Image processing returned empty bytes")
-        #     _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
-        #     return
+        logger.info(f"[{job_id}] Processing thermal assets (dithering & strip chunking)")
+        _update(job_id, progress_step="processing_image")
+        try:
+            thermal_assets = await _run_with_timeout(
+                job_id=job_id,
+                step_name="image_processing",
+                timeout=IMAGE_PROCESSING_TIMEOUT_SECONDS,
+                operation=lambda: image_processing.process_thermal_assets(image_bytes),
+            )
+        except PipelineError as exc:
+            _set_error(job_id, exc.code, exc.message)
+            return
+        except Exception as exc:
+            logger.warning(f"[{job_id}] Image processing failed error={exc}")
+            _set_error(job_id, "IMAGE_PROCESSING_FAILED", "Image processing failed")
+            return
 
         if _check_cancelled(job_id, "uploading"):
             return
-        logger.info(f"[{job_id}] Uploading to storage")
+        logger.info(f"[{job_id}] Uploading assets to storage")
         _update(job_id, progress_step="uploading")
-        filename = f"stickers/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{device_id}.png"
+        base_filename = f"stickers/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{device_id}"
+
         try:
+            # 1. Display PNG (512x512 high-res for screen / parent app)
             image_url = await _run_with_retry(
                 job_id=job_id,
-                step_name="upload",
+                step_name="upload_display",
                 timeout=UPLOAD_TIMEOUT_SECONDS,
-                operation=lambda: storage_service.upload_bytes(image_bytes, filename),
+                operation=lambda: storage_service.upload_bytes(thermal_assets["display_png"], f"{base_filename}.png"),
                 failure_code="UPLOAD_FAILED",
-                failure_message="Image upload failed",
+                failure_message="Display image upload failed",
+            )
+            # 2. Print Binary (24-row strip chunked ESC/POS binary)
+            print_url = await _run_with_retry(
+                job_id=job_id,
+                step_name="upload_print_bin",
+                timeout=UPLOAD_TIMEOUT_SECONDS,
+                operation=lambda: storage_service.upload_bytes(thermal_assets["print_bin"], f"{base_filename}_384_strips.bin"),
+                failure_code="UPLOAD_FAILED",
+                failure_message="Print binary upload failed",
+            )
+            # 3. Print Visual 1-bit PNG (for web preview / Pi inspection)
+            print_png_url = await _run_with_retry(
+                job_id=job_id,
+                step_name="upload_print_png",
+                timeout=UPLOAD_TIMEOUT_SECONDS,
+                operation=lambda: storage_service.upload_bytes(thermal_assets["print_png"], f"{base_filename}_384.png"),
+                failure_code="UPLOAD_FAILED",
+                failure_message="Print PNG upload failed",
             )
         except PipelineError as exc:
             _set_error(job_id, exc.code, exc.message)
             return
 
-        _update(job_id, image_url=image_url)
-        logger.info(f"[{job_id}] Image URL={image_url}")
+        _update(
+            job_id,
+            image_url=image_url,
+            print_url=print_url,
+            print_png_url=print_png_url,
+            num_strips=thermal_assets.get("num_strips", 16),
+            strip_size=thermal_assets.get("strip_size", 1160),
+        )
+        logger.info(f"[{job_id}] Assets uploaded: image_url={image_url}, print_url={print_url}")
 
         if _check_cancelled(job_id, "saving"):
             return
@@ -415,6 +442,7 @@ async def run_sticker_pipeline(
             normalized_prompt=normalized_prompt,
             language=language,
             image_url=image_url,
+            print_url=print_url,
             expires_at=expires_at,
         )
         try:
