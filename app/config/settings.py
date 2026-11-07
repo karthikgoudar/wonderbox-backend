@@ -1,12 +1,26 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Automatically load .env from project root
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
 
 class Settings:
     PROJECT_NAME = "WonderBox Backend"
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./wonderbox.db")
+    BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
     STORAGE_DIR = os.getenv("STORAGE_DIR", "./storage")
     DEFAULT_EXPIRY_DAYS = int(os.getenv("DEFAULT_EXPIRY_DAYS", "25"))
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
     JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
+    # Thermal Printer Configuration (Standard 58mm / 384-dot)
+    PRINTER_WIDTH = int(os.getenv("PRINTER_WIDTH", "384"))
+    PRINTER_THRESHOLD = int(os.getenv("PRINTER_THRESHOLD", "200"))
+    PRINTER_CHUNK_ROWS = int(os.getenv("PRINTER_CHUNK_ROWS", "24"))
     
     # STT (Speech-to-Text) Configuration
     STT_PRIMARY_PROVIDER = os.getenv("STT_PRIMARY_PROVIDER", "local_whisper")  # local_whisper, groq, openai

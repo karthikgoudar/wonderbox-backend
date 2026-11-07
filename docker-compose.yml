@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: wonderbox-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - BASE_URL=http://localhost:8000
+      - STORAGE_DIR=/app/storage
+    env_file:
+      - .env
+    volumes:
+      - ./storage:/app/storage
+      - ./wonderbox.db:/app/wonderbox.db
+    restart: unless-stopped

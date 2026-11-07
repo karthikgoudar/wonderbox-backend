@@ -4,10 +4,16 @@ from app.config.settings import settings
 
 
 async def upload_bytes(data: bytes, path: str) -> str:
-    """Upload bytes to local storage. Returns the destination file path."""
-    full_dir = settings.STORAGE_DIR
-    os.makedirs(full_dir, exist_ok=True)
-    dest = os.path.join(full_dir, os.path.basename(path))
-    async with aiofiles.open(dest, "wb") as f:
+    """
+    Upload bytes to local storage and return the fully qualified public URL.
+    Preserves subdirectories (e.g. 'stickers/...' or 'stories/...').
+    """
+    rel_path = path.lstrip("/").replace("\\", "/")
+    full_dest = os.path.join(settings.STORAGE_DIR, rel_path)
+    os.makedirs(os.path.dirname(full_dest), exist_ok=True)
+
+    async with aiofiles.open(full_dest, "wb") as f:
         await f.write(data)
-    return dest
+
+    base = settings.BASE_URL.rstrip("/")
+    return f"{base}/storage/{rel_path}"

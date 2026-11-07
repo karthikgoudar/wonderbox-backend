@@ -40,6 +40,7 @@ class StoryScene(Base):
     order_index = Column(Integer, nullable=False, index=True)
     audio_url = Column(String, nullable=False)
     image_url = Column(String, nullable=False)
+    print_url = Column(String, nullable=True)
     duration_seconds = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 

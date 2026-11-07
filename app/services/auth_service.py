@@ -52,19 +52,44 @@ def authenticate_user(db: Session, email: str, password: str) -> User:
     return user
 
 
-def validate_device(db: Session, device_id: str, device_token: Optional[str] = None):
-    device = device_repository.get_by_device_id(db, device_id)
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+def validate_device(db: Session, device_id: Optional[str] = None, device_token: Optional[str] = None):
+    """
+    Validate device by token and/or device_id.
+    Allows header-only authentication (e.g. from ESP32 sending x-device-token),
+    as well as form-based authentication.
+    """
+    device = None
 
-    expected_token = getattr(device, "token", None)
-    if expected_token:
-        if not device_token:
+    if device_token:
+        hashed_token = hash_token(device_token)
+        # Match either hashed token or raw token in DB
+        device = (
+            device_repository.get_by_token(db, hashed_token)
+            or device_repository.get_by_token(db, device_token)
+        )
+        if not device and device_id:
+            device = device_repository.get_by_device_id(db, device_id)
+            if not device:
+                raise HTTPException(status_code=404, detail="Device not found")
+            expected_token = getattr(device, "token", None)
+            if expected_token != hashed_token and expected_token != device_token:
+                logger.warning(f"Invalid token for device {device_id}")
+                raise HTTPException(status_code=401, detail="Invalid device token")
+        elif not device:
+            raise HTTPException(status_code=401, detail="Invalid device token")
+
+        if device_id and device.device_id != device_id:
+            logger.warning(f"Device ID mismatch: requested {device_id}, token belongs to {device.device_id}")
+            raise HTTPException(status_code=401, detail="Device ID mismatch")
+
+    elif device_id:
+        device = device_repository.get_by_device_id(db, device_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        if getattr(device, "token", None):
             logger.warning(f"Device token required for device {device_id}")
             raise HTTPException(status_code=401, detail="Device token required")
-        provided_hashed_token = hash_token(device_token)
-        if expected_token != provided_hashed_token and expected_token != device_token:
-            logger.warning(f"Invalid token for device {device_id}")
-            raise HTTPException(status_code=401, detail="Invalid device token")
+    else:
+        raise HTTPException(status_code=401, detail="Device credentials required (X-Device-Token or device_id)")
 
     return device

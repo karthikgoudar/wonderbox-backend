@@ -21,7 +21,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_current_device
@@ -56,13 +56,19 @@ def _sse(event: str, data: dict) -> str:
 async def submit_sticker(
     child_id: str = Form(...),
     audio: UploadFile = File(...),
+    mode: str = Query(
+        default="stream",
+        description="'stream' for 2-step SSE polling, 'direct' for synchronous single-request fast path (ESP32)",
+    ),
     device=Depends(get_current_device),
 ):
     """
-    Step 1 — Accept audio and kick off the pipeline in the background.
+    Step 1 — Accept audio and kick off the pipeline.
 
-    Returns immediately with a job_id the client can use to open the SSE stream.
-    Does NOT block. Does NOT stream. Does NOT process the audio here.
+    Modes:
+      - mode='stream' (default): Returns immediately with {"job_id": "..."} for SSE streaming.
+      - mode='direct': Awaits pipeline completion and returns full JSON payload with image_url and print_url.
+                       Saves multiple TLS handshakes and avoids SSE parsing on microcontrollers.
     """
     # Child existence check before accepting the job
     db = SessionLocal()
@@ -81,9 +87,39 @@ async def submit_sticker(
     job_id = str(uuid.uuid4())
     create_job(job_id)
 
-    logger.info(f"[{job_id}] Accepted submit for device={device.device_id} child={child_id}")
+    logger.info(f"[{job_id}] Accepted submit for device={device.device_id} child={child_id} mode={mode}")
 
-    # Fire-and-forget background task — pipeline updates jobs[job_id] as it runs
+    if mode == "direct":
+        # Direct synchronous execution (fast-path for screen-free microcontrollers like ESP32)
+        await run_sticker_pipeline(
+            job_id=job_id,
+            audio_bytes=audio_bytes,
+            device_id=device.device_id,
+            child_id=child_id,
+        )
+        job = get_job(job_id) or {}
+        if job.get("status") == "done":
+            return {
+                "status": "done",
+                "job_id": job_id,
+                "sticker_id": job.get("sticker_id"),
+                "text": job.get("text"),
+                "language": job.get("language"),
+                "image_url": job.get("image_url"),
+                "print_url": job.get("print_url"),
+                "print_png_url": job.get("print_png_url"),
+            }
+        else:
+            err = job.get("error") or {}
+            err_msg = err.get("message", "Generation failed") if isinstance(err, dict) else str(err)
+            err_code = err.get("code", "GENERATION_ERROR") if isinstance(err, dict) else "GENERATION_ERROR"
+            return Response(
+                content=json.dumps({"detail": err_msg, "code": err_code}),
+                status_code=500,
+                media_type="application/json",
+            )
+
+    # Default 'stream' mode — fire-and-forget background task
     asyncio.create_task(
         run_sticker_pipeline(
             job_id=job_id,
@@ -154,12 +190,27 @@ async def stream_sticker(job_id: str):
 
             # ── image_ready (sent once when image_url is available) ───────────
             if not sent_image_ready and current.get("image_url"):
-                yield _sse("image_ready", {"image_url": current["image_url"]})
+                yield _sse(
+                    "image_ready",
+                    {
+                        "image_url": current["image_url"],
+                        "print_url": current.get("print_url"),
+                        "print_png_url": current.get("print_png_url"),
+                    },
+                )
                 sent_image_ready = True
 
             # ── terminal: done ────────────────────────────────────────────────
             if current.get("status") == "done":
-                yield _sse("done", {"sticker_id": current.get("sticker_id")})
+                yield _sse(
+                    "done",
+                    {
+                        "sticker_id": current.get("sticker_id"),
+                        "image_url": current.get("image_url"),
+                        "print_url": current.get("print_url"),
+                        "print_png_url": current.get("print_png_url"),
+                    },
+                )
                 logger.info(f"[{job_id}] Stream closed — done")
                 return
 
