@@ -23,7 +23,7 @@ class Settings:
     PRINTER_CHUNK_ROWS = int(os.getenv("PRINTER_CHUNK_ROWS", "24"))
     
     # STT (Speech-to-Text) Configuration
-    STT_PRIMARY_PROVIDER = os.getenv("STT_PRIMARY_PROVIDER", "local_whisper")  # local_whisper, groq, openai
+    STT_PRIMARY_PROVIDER = os.getenv("STT_PRIMARY_PROVIDER", "local_whisper")  # local_whisper, groq, openai, sarvam
     STT_ENABLE_FALLBACK = os.getenv("STT_ENABLE_FALLBACK", "true").lower() == "true"
     
     # Local Whisper settings
@@ -35,6 +35,15 @@ class Settings:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Add your Groq API key
     GROQ_MODEL = os.getenv("GROQ_MODEL", "whisper-large-v3")
     
+    # Sarvam AI (built for Indian languages: Kannada, Hindi, English and more)
+    SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
+    SARVAM_URL = os.getenv("SARVAM_URL", "https://api.sarvam.ai/speech-to-text")
+    # saaras:v3 documents the `mode` option used for translation; v4 is the newer default
+    SARVAM_MODEL = os.getenv("SARVAM_MODEL", "saaras:v3")
+    SARVAM_TIMEOUT = float(os.getenv("SARVAM_TIMEOUT", "30"))
+    # For non-English speech, also ask Sarvam for an English version to draw from
+    SARVAM_TRANSLATE = os.getenv("SARVAM_TRANSLATE", "true").lower() == "true"
+
     # OpenAI Whisper API (paid fallback)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # Add your OpenAI API key
     OPENAI_WHISPER_MODEL = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
