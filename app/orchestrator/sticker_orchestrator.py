@@ -302,8 +302,14 @@ async def run_sticker_pipeline(
             _set_error(job_id, "STT_FAILED", "Could not transcribe audio")
             return
         
-        prompt_text = original_text
-        
+        # Non-English speech: draw from the English version when the STT provider
+        # supplied one (Sarvam translate mode); otherwise use the original text.
+        prompt_text = str(stt.get("english_text", "") or "").strip() or original_text
+        if prompt_text != original_text:
+            logger.info(f"[{job_id}] Using English translation for the image prompt: '{prompt_text}'")
+        elif not language.startswith("en"):
+            logger.warning(f"[{job_id}] No English translation for language={language}; using original text")
+
         _update(job_id, text=original_text, language=language)
         logger.info(f"[{job_id}] Transcript='{original_text}' language={language}")
 

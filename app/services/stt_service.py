@@ -2,12 +2,14 @@
 Speech-to-Text Service with Multi-Provider Fallback
 ====================================================
 
-Transcription priority:
-1. Local Whisper (faster-whisper) - Free, runs on your server
-2. Groq API (Whisper) - Free tier available, fast inference
-3. OpenAI Whisper API - Paid, highly reliable
+Providers (set STT_PRIMARY_PROVIDER; the rest act as fallbacks):
+- sarvam:        Built for Indian languages (Kannada, Hindi, English, ...). Needs SARVAM_API_KEY.
+- groq:          Whisper on Groq. Fast and cheap; weaker on Kannada.
+- openai:        Whisper API. Paid.
+- local_whisper: faster-whisper on this server. Free.
 
-Supported languages: English (en), Hindi (hi)
+Every result has "language" as a short code: en, hi, kn, ...
+Sarvam results may also carry "english_text" for non-English speech.
 """
 
 import asyncio
@@ -15,6 +17,8 @@ import io
 import logging
 import tempfile
 from typing import Optional
+
+import httpx
 
 from app.config.settings import settings
 
@@ -226,6 +230,77 @@ async def _transcribe_openai(audio_bytes: bytes) -> dict:
         raise
 
 
+# ── Language codes ────────────────────────────────────────────────────────────
+_LANGUAGE_NAMES = {
+    "english": "en", "hindi": "hi", "kannada": "kn", "tamil": "ta", "telugu": "te",
+    "marathi": "mr", "bengali": "bn", "gujarati": "gu", "malayalam": "ml", "punjabi": "pa",
+}
+
+
+def normalize_language(value) -> str:
+    """Return a short code ("en", "hi", "kn") from 'hi-IN', 'Hindi', 'kn', ...
+
+    Whisper providers return names like "hindi"; Sarvam returns "hi-IN".
+    Missing or unknown values become "en", as before.
+    """
+    if not value:
+        return "en"
+    v = str(value).strip().lower()
+    if v in _LANGUAGE_NAMES:
+        return _LANGUAGE_NAMES[v]
+    if v in ("unknown", "none", "null"):
+        return "en"
+    return v.split("-")[0].split("_")[0]
+
+
+# ── Sarvam ────────────────────────────────────────────────────────────────────
+def _sarvam_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=settings.SARVAM_TIMEOUT)
+
+
+async def _sarvam_call(audio_bytes: bytes, mode: str) -> dict:
+    """One call to Sarvam's /speech-to-text. mode: "transcribe" or "translate"."""
+    if not settings.SARVAM_API_KEY:
+        raise RuntimeError("Sarvam API key not set")
+    async with _sarvam_client() as client:
+        resp = await client.post(
+            settings.SARVAM_URL,
+            headers={"api-subscription-key": settings.SARVAM_API_KEY},
+            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            data={"model": settings.SARVAM_MODEL, "mode": mode, "language_code": "unknown"},
+        )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Sarvam HTTP {resp.status_code}: {resp.text[:200]}")
+    return resp.json()
+
+
+async def _transcribe_sarvam(audio_bytes: bytes) -> dict:
+    """
+    Transcribe with Sarvam AI (auto-detects Kannada, Hindi, English, ...).
+
+    For non-English speech it makes a second call in "translate" mode to get
+    English text, which the image step draws from. That second call is best
+    effort: if it fails, the original-language text is still returned.
+    """
+    data = await _sarvam_call(audio_bytes, "transcribe")
+    text = (data.get("transcript") or "").strip()
+    language = normalize_language(data.get("language_code"))
+    logger.info(f"Sarvam transcription: lang={language}, text_length={len(text)}")
+
+    result = {"text": text, "language": language, "provider": "sarvam"}
+
+    if text and language != "en" and settings.SARVAM_TRANSLATE:
+        try:
+            tr = await _sarvam_call(audio_bytes, "translate")
+            english = (tr.get("transcript") or "").strip()
+            if english:
+                result["english_text"] = english
+                logger.info(f"Sarvam translation to English: text_length={len(english)}")
+        except Exception as e:
+            logger.warning(f"Sarvam translation failed; using original text: {e}")
+    return result
+
+
 async def transcribe(audio_bytes: bytes) -> dict:
     """
     Transcribe audio to text with automatic provider fallback.
@@ -236,8 +311,9 @@ async def transcribe(audio_bytes: bytes) -> dict:
     Returns:
         {
             "text": "transcribed text",
-            "language": "en" or "hi",
-            "provider": "local_whisper" | "groq" | "openai"
+            "language": "en" | "hi" | "kn" | ...,
+            "provider": "sarvam" | "local_whisper" | "groq" | "openai",
+            "english_text": optional English version (Sarvam, non-English speech)
         }
     
     Raises:
@@ -247,7 +323,9 @@ async def transcribe(audio_bytes: bytes) -> dict:
     providers = []
     
     # Primary provider
-    if settings.STT_PRIMARY_PROVIDER == "local_whisper":
+    if settings.STT_PRIMARY_PROVIDER == "sarvam":
+        providers.append(("sarvam", _transcribe_sarvam))
+    elif settings.STT_PRIMARY_PROVIDER == "local_whisper":
         providers.append(("local_whisper", _transcribe_local_whisper))
     elif settings.STT_PRIMARY_PROVIDER == "groq":
         providers.append(("groq", _transcribe_groq))
@@ -256,6 +334,8 @@ async def transcribe(audio_bytes: bytes) -> dict:
     
     # Fallback providers (if enabled)
     if settings.STT_ENABLE_FALLBACK:
+        if settings.STT_PRIMARY_PROVIDER != "sarvam" and settings.SARVAM_API_KEY:
+            providers.append(("sarvam", _transcribe_sarvam))
         if settings.STT_PRIMARY_PROVIDER != "groq" and settings.GROQ_API_KEY:
             providers.append(("groq", _transcribe_groq))
         if settings.STT_PRIMARY_PROVIDER != "openai" and settings.OPENAI_API_KEY:
@@ -270,6 +350,7 @@ async def transcribe(audio_bytes: bytes) -> dict:
             logger.info(f"Attempting transcription with: {provider_name}")
             result = await provider_func(audio_bytes)
             logger.info(f"✓ Transcription successful with {provider_name}")
+            result["language"] = normalize_language(result.get("language"))
             return result
         except Exception as e:
             logger.warning(f"✗ {provider_name} failed: {e}")
