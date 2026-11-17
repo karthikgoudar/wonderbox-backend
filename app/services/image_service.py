@@ -265,6 +265,9 @@ async def _generate_openai(prompt: str) -> bytes:
         payload["response_format"] = "b64_json"  # DALL-E returns URLs otherwise
     else:
         payload["quality"] = settings.OPENAI_IMAGE_QUALITY
+        # JPEG comes back about 8x smaller than PNG (135 KB vs 1.1 MB) and about
+        # 1 s sooner. It is converted to PNG below, so later steps are unchanged.
+        payload["output_format"] = "jpeg"
 
     try:
         async with _openai_image_client() as client:

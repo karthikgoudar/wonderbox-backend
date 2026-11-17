@@ -68,8 +68,8 @@ class Settings:
     )
     
     # OpenAI image generation (uses OPENAI_API_KEY above; needs account credit)
-    OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1.5")
-    OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "medium")  # low, medium, high
+    OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.6-flare")
+    OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")  # low, medium, high
     OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")
     OPENAI_IMAGE_TIMEOUT = float(os.getenv("OPENAI_IMAGE_TIMEOUT", "120"))
 
