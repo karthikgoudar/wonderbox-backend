@@ -63,6 +63,7 @@ def test_returns_png_and_sends_right_request(openai):
     assert body["model"] == "gpt-image-1.5" and body["quality"] == "medium"
     assert body["size"] == "1024x1024" and body["n"] == 1
     assert "response_format" not in body  # GPT Image models reject it
+    assert body["output_format"] == "jpeg"  # smaller and faster than PNG
     assert "a happy cat on a rocket" in body["prompt"] and "coloring book" in body["prompt"]
 
 
@@ -71,6 +72,14 @@ def test_dalle_asks_for_base64_and_skips_quality(openai, monkeypatch):
     run(image_service._generate_openai("x"))
     body = openai.calls[0]["json"]
     assert body["response_format"] == "b64_json" and "quality" not in body
+    assert "output_format" not in body  # DALL-E does not take it
+
+
+def test_jpeg_reply_is_turned_into_png(openai):
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buf, format="JPEG")
+    openai.state["body"] = {"data": [{"b64_json": base64.b64encode(buf.getvalue()).decode()}]}
+    assert run(image_service._generate_openai("x")).startswith(b"\x89PNG")
 
 
 def test_no_credit_error_is_readable(openai):
