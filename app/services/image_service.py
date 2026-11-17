@@ -10,6 +10,7 @@ This protects API costs and allows centralized quota management.
 Providers:
 1. Replicate (Flux/SDXL) - Cost-effective, free tier available, fast
 2. Stability AI (SDXL) - High-quality, has "line-art" preset perfect for coloring
+3. Cloudflare Workers AI (FLUX Schnell) - free daily allowance, no card needed
 
 Optimized for: Children's coloring stickers (bold outlines, simple shapes)
 """
@@ -183,6 +184,59 @@ async def _generate_stability(prompt: str) -> bytes:
         raise
 
 
+def _cloudflare_client() -> httpx.AsyncClient:
+    """HTTP client for Cloudflare (a separate function so tests can swap it)."""
+    return httpx.AsyncClient(timeout=settings.CLOUDFLARE_TIMEOUT)
+
+
+async def _generate_cloudflare(prompt: str) -> bytes:
+    """
+    Generate image using Cloudflare Workers AI (FLUX.1 Schnell).
+
+    Pros: free daily allowance (about 200 images/day at 4 steps), fast (~3s)
+    Cons: fixed 1024x1024 output (downstream processing resizes it)
+
+    Returns PNG bytes (Cloudflare sends JPEG; converted for consistency).
+    """
+    if not (settings.CLOUDFLARE_ACCOUNT_ID and settings.CLOUDFLARE_API_TOKEN):
+        raise RuntimeError("Cloudflare account ID or API token not configured")
+
+    url = (
+        "https://api.cloudflare.com/client/v4/accounts/"
+        f"{settings.CLOUDFLARE_ACCOUNT_ID}/ai/run/{settings.CLOUDFLARE_IMAGE_MODEL}"
+    )
+    payload = {
+        "prompt": _enhance_prompt_for_coloring_book(prompt),
+        "steps": max(1, min(8, settings.CLOUDFLARE_IMAGE_STEPS)),
+    }
+    try:
+        async with _cloudflare_client() as client:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {settings.CLOUDFLARE_API_TOKEN}"},
+                json=payload,
+            )
+        data = response.json() if response.content else {}
+        if response.status_code != 200 or not data.get("success"):
+            errors = [e.get("message") for e in data.get("errors", [])] if isinstance(data, dict) else []
+            raise RuntimeError(f"Cloudflare error {response.status_code}: {errors or response.text[:200]}")
+
+        image_b64 = (data.get("result") or {}).get("image")
+        if not image_b64:
+            raise RuntimeError("No image in Cloudflare response")
+
+        with Image.open(io.BytesIO(base64.b64decode(image_b64))) as img:
+            out = io.BytesIO()
+            img.save(out, format="PNG")
+        image_bytes = out.getvalue()
+        logger.info(f"Cloudflare image generated: {len(image_bytes)} bytes")
+        return image_bytes
+
+    except Exception as e:
+        logger.error(f"Cloudflare generation failed: {e}")
+        raise
+
+
 async def generate_from_prompt(prompt: str) -> bytes:
     """
     Generate a coloring book style image from a text prompt.
@@ -207,6 +261,8 @@ async def generate_from_prompt(prompt: str) -> bytes:
         providers.append(("replicate", _generate_replicate))
     elif settings.IMAGE_PRIMARY_PROVIDER == "stability":
         providers.append(("stability", _generate_stability))
+    elif settings.IMAGE_PRIMARY_PROVIDER == "cloudflare":
+        providers.append(("cloudflare", _generate_cloudflare))
     
     # Fallback providers (if enabled)
     if settings.IMAGE_ENABLE_FALLBACK:
@@ -214,6 +270,9 @@ async def generate_from_prompt(prompt: str) -> bytes:
             providers.append(("replicate", _generate_replicate))
         if settings.IMAGE_PRIMARY_PROVIDER != "stability" and settings.STABILITY_API_KEY:
             providers.append(("stability", _generate_stability))
+        if (settings.IMAGE_PRIMARY_PROVIDER != "cloudflare"
+                and settings.CLOUDFLARE_ACCOUNT_ID and settings.CLOUDFLARE_API_TOKEN):
+            providers.append(("cloudflare", _generate_cloudflare))
     
     # Try each provider in order
     last_error = None
