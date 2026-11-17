@@ -11,6 +11,7 @@ Providers:
 1. Replicate (Flux/SDXL) - Cost-effective, free tier available, fast
 2. Stability AI (SDXL) - High-quality, has "line-art" preset perfect for coloring
 3. Cloudflare Workers AI (FLUX Schnell) - free daily allowance, no card needed
+4. OpenAI (GPT Image) - best quality in our tests, paid per image
 
 Optimized for: Children's coloring stickers (bold outlines, simple shapes)
 """
@@ -237,6 +238,65 @@ async def _generate_cloudflare(prompt: str) -> bytes:
         raise
 
 
+def _openai_image_client() -> httpx.AsyncClient:
+    """HTTP client for OpenAI images (a separate function so tests can swap it)."""
+    return httpx.AsyncClient(timeout=settings.OPENAI_IMAGE_TIMEOUT)
+
+
+async def _generate_openai(prompt: str) -> bytes:
+    """
+    Generate image using OpenAI's image API (GPT Image models).
+
+    Pros: best-looking stickers in our trials
+    Cons: paid per image; slower than FLUX Schnell
+
+    Returns PNG bytes.
+    """
+    if not settings.OPENAI_API_KEY:
+        raise RuntimeError("OpenAI API key not configured")
+
+    payload = {
+        "model": settings.OPENAI_IMAGE_MODEL,
+        "prompt": _enhance_prompt_for_coloring_book(prompt),
+        "size": settings.OPENAI_IMAGE_SIZE,
+        "n": 1,
+    }
+    if settings.OPENAI_IMAGE_MODEL.startswith("dall-e"):
+        payload["response_format"] = "b64_json"  # DALL-E returns URLs otherwise
+    else:
+        payload["quality"] = settings.OPENAI_IMAGE_QUALITY
+
+    try:
+        async with _openai_image_client() as client:
+            response = await client.post(
+                "https://api.openai.com/v1/images/generations",
+                headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                json=payload,
+            )
+        data = response.json() if response.content else {}
+        if response.status_code != 200:
+            err = (data.get("error") or {}) if isinstance(data, dict) else {}
+            raise RuntimeError(
+                f"OpenAI error {response.status_code} ({err.get('code')}): {err.get('message') or response.text[:200]}"
+            )
+
+        items = data.get("data") or []
+        image_b64 = items[0].get("b64_json") if items else None
+        if not image_b64:
+            raise RuntimeError("No image in OpenAI response")
+
+        with Image.open(io.BytesIO(base64.b64decode(image_b64))) as img:
+            out = io.BytesIO()
+            img.save(out, format="PNG")
+        image_bytes = out.getvalue()
+        logger.info(f"OpenAI image generated ({settings.OPENAI_IMAGE_MODEL}): {len(image_bytes)} bytes")
+        return image_bytes
+
+    except Exception as e:
+        logger.error(f"OpenAI image generation failed: {e}")
+        raise
+
+
 async def generate_from_prompt(prompt: str) -> bytes:
     """
     Generate a coloring book style image from a text prompt.
@@ -263,16 +323,19 @@ async def generate_from_prompt(prompt: str) -> bytes:
         providers.append(("stability", _generate_stability))
     elif settings.IMAGE_PRIMARY_PROVIDER == "cloudflare":
         providers.append(("cloudflare", _generate_cloudflare))
+    elif settings.IMAGE_PRIMARY_PROVIDER == "openai":
+        providers.append(("openai", _generate_openai))
     
-    # Fallback providers (if enabled)
+    # Fallback providers (if enabled). Free Cloudflare is tried first.
+    # OpenAI is only used when chosen as primary, never as a silent paid fallback.
     if settings.IMAGE_ENABLE_FALLBACK:
+        if (settings.IMAGE_PRIMARY_PROVIDER != "cloudflare"
+                and settings.CLOUDFLARE_ACCOUNT_ID and settings.CLOUDFLARE_API_TOKEN):
+            providers.append(("cloudflare", _generate_cloudflare))
         if settings.IMAGE_PRIMARY_PROVIDER != "replicate" and settings.REPLICATE_API_TOKEN:
             providers.append(("replicate", _generate_replicate))
         if settings.IMAGE_PRIMARY_PROVIDER != "stability" and settings.STABILITY_API_KEY:
             providers.append(("stability", _generate_stability))
-        if (settings.IMAGE_PRIMARY_PROVIDER != "cloudflare"
-                and settings.CLOUDFLARE_ACCOUNT_ID and settings.CLOUDFLARE_API_TOKEN):
-            providers.append(("cloudflare", _generate_cloudflare))
     
     # Try each provider in order
     last_error = None
