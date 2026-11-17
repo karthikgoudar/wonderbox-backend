@@ -49,7 +49,7 @@ class Settings:
     OPENAI_WHISPER_MODEL = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
     
     # Image Generation Configuration
-    IMAGE_PRIMARY_PROVIDER = os.getenv("IMAGE_PRIMARY_PROVIDER", "replicate")  # replicate, stability
+    IMAGE_PRIMARY_PROVIDER = os.getenv("IMAGE_PRIMARY_PROVIDER", "replicate")  # replicate, stability, cloudflare, openai
     IMAGE_ENABLE_FALLBACK = os.getenv("IMAGE_ENABLE_FALLBACK", "true").lower() == "true"
     
     # Image generation settings
@@ -67,6 +67,20 @@ class Settings:
         # Alternative: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b"
     )
     
+    # OpenAI image generation (uses OPENAI_API_KEY above; needs account credit)
+    OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1.5")
+    OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "medium")  # low, medium, high
+    OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")
+    OPENAI_IMAGE_TIMEOUT = float(os.getenv("OPENAI_IMAGE_TIMEOUT", "120"))
+
+    # Cloudflare Workers AI (FLUX Schnell; free daily allowance, no card needed)
+    # Token needs only the "Workers AI" permission group (Read + Edit).
+    CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+    CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
+    CLOUDFLARE_IMAGE_MODEL = os.getenv("CLOUDFLARE_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell")
+    CLOUDFLARE_IMAGE_STEPS = int(os.getenv("CLOUDFLARE_IMAGE_STEPS", "4"))  # 1-8; more = slower, uses more allowance
+    CLOUDFLARE_TIMEOUT = float(os.getenv("CLOUDFLARE_TIMEOUT", "60"))
+
     # Stability AI (Stable Diffusion)
     # Backend uses ONE API key for all devices
     STABILITY_API_KEY = os.getenv("STABILITY_API_KEY", "")
