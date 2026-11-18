@@ -68,6 +68,10 @@ class Settings:
     )
     
     # OpenAI image generation (uses OPENAI_API_KEY above; needs account credit)
+    # Device rate limit (see rate_limit_service): requests per minute, block time
+    RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "4"))
+    RATE_LIMIT_BLOCK_SECONDS = int(os.getenv("RATE_LIMIT_BLOCK_SECONDS", "300"))
+
     OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.6-flare")
     OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")  # low, medium, high
     OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")

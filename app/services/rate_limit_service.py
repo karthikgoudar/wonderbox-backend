@@ -3,15 +3,19 @@ import time
 
 from fastapi import HTTPException
 
+from app.config.settings import settings
+
 
 logger = logging.getLogger(__name__)
 
 device_requests = {}
 device_violations = {}
 
+# Per device: at most RATE_LIMIT_MAX_REQUESTS requests in RATE_LIMIT_WINDOW
+# seconds, otherwise the device is blocked for RATE_LIMIT_BLOCK_SECONDS.
+# Defaults (4 a minute, 5-minute block) suit a child at home; raise them in
+# .env for demos where people press the button quickly.
 RATE_LIMIT_WINDOW = 60
-MAX_REQUESTS = 4
-BLOCK_DURATION = 300
 
 CLEANUP_INTERVAL = 30
 MAX_TRACKED_DEVICES = 10000
@@ -70,8 +74,8 @@ def check_rate_limit(device_id: str):
         request_time for request_time in device_requests[device_id] if now - request_time < RATE_LIMIT_WINDOW
     ]
 
-    if len(device_requests[device_id]) >= MAX_REQUESTS:
-        device_violations[device_id] = now + BLOCK_DURATION
+    if len(device_requests[device_id]) >= settings.RATE_LIMIT_MAX_REQUESTS:
+        device_violations[device_id] = now + settings.RATE_LIMIT_BLOCK_SECONDS
         logger.warning(f"rate_limit_exceeded device={device_id}")
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
