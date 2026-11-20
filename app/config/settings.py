@@ -51,6 +51,10 @@ class Settings:
         for c in os.getenv("STT_ALLOWED_LANGUAGES", "en,kn,hi").split(",")
         if c.strip()
     ]
+    # Sarvam gives a 0-1 score for how sure it is of the language. If it hears
+    # a language outside the list but is less sure than this, the speech is
+    # transcribed again as the closest allowed language instead of refused.
+    STT_UNSURE_BELOW = float(os.getenv("STT_UNSURE_BELOW", "0.7"))
 
     # OpenAI Whisper API (paid fallback)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # Add your OpenAI API key
