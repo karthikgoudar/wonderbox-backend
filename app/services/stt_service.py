@@ -253,6 +253,12 @@ def normalize_language(value) -> str:
     return v.split("-")[0].split("_")[0]
 
 
+def is_allowed_language(code) -> bool:
+    """True if this language code is in STT_ALLOWED_LANGUAGES (empty list = all)."""
+    allowed = settings.STT_ALLOWED_LANGUAGES
+    return not allowed or normalize_language(code) in allowed
+
+
 # ── Sarvam ────────────────────────────────────────────────────────────────────
 def _sarvam_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=settings.SARVAM_TIMEOUT)
@@ -289,7 +295,8 @@ async def _transcribe_sarvam(audio_bytes: bytes) -> dict:
 
     result = {"text": text, "language": language, "provider": "sarvam"}
 
-    if text and language != "en" and settings.SARVAM_TRANSLATE:
+    # No translation for languages we will refuse anyway (saves a paid call)
+    if text and language != "en" and settings.SARVAM_TRANSLATE and is_allowed_language(language):
         try:
             tr = await _sarvam_call(audio_bytes, "translate")
             english = (tr.get("transcript") or "").strip()

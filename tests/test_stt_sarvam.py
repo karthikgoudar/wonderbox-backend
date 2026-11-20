@@ -127,3 +127,24 @@ def test_sarvam_used_as_fallback_when_key_present(monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
     assert run(stt_service.transcribe(b"x"))["provider"] == "sarvam"
     assert log == ["groq", "sarvam"]
+
+
+# ── Allowed languages (English, Kannada, Hindi) ──────────────────────────────
+
+def test_only_english_kannada_hindi_allowed_by_default():
+    assert settings.STT_ALLOWED_LANGUAGES == ["en", "kn", "hi"]
+    ok = stt_service.is_allowed_language
+    assert all(ok(c) for c in ("en", "en-IN", "kn-IN", "hi-IN", "Hindi", "kannada", None))
+    assert not any(ok(c) for c in ("ta-IN", "te-IN", "mr-IN", "bn", "Tamil", "fr"))
+
+
+def test_empty_allowed_list_allows_every_language(monkeypatch):
+    monkeypatch.setattr(settings, "STT_ALLOWED_LANGUAGES", [])
+    assert stt_service.is_allowed_language("ta-IN")
+
+
+def test_refused_language_is_not_translated(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "எனக்கு யானை வேண்டும்", "language_code": "ta-IN"}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "ta" and "english_text" not in r
+    assert len(sarvam.calls) == 1  # no paid translate call
