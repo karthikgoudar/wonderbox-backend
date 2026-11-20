@@ -302,6 +302,12 @@ async def run_sticker_pipeline(
             _set_error(job_id, "STT_FAILED", "Could not transcribe audio")
             return
         
+        if not stt_service.is_allowed_language(language):
+            logger.warning(f"[{job_id}] Language not allowed: language={language} text='{original_text}'")
+            _update(job_id, text=original_text, language=language)
+            _set_error(job_id, "LANGUAGE_NOT_SUPPORTED", "Please speak in English, Kannada or Hindi")
+            return
+
         # Non-English speech: draw from the English version when the STT provider
         # supplied one (Sarvam translate mode); otherwise use the original text.
         prompt_text = str(stt.get("english_text", "") or "").strip() or original_text

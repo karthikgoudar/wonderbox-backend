@@ -253,13 +253,39 @@ def normalize_language(value) -> str:
     return v.split("-")[0].split("_")[0]
 
 
+def is_allowed_language(code) -> bool:
+    """True if this language code is in STT_ALLOWED_LANGUAGES (empty list = all)."""
+    allowed = settings.STT_ALLOWED_LANGUAGES
+    return not allowed or normalize_language(code) in allowed
+
+
+# Languages that sound closest to Kannada; anything else is closest to Hindi
+_SOUNDS_LIKE_KANNADA = {"te", "ta", "ml", "tcy"}
+
+
+def _closest_allowed(code):
+    """For a language outside the allowed list, the allowed one it most likely
+    was (Kannada for South Indian languages, else Hindi). None if `code` is
+    already allowed or there is nothing to choose."""
+    if is_allowed_language(code):
+        return None
+    allowed = [c for c in settings.STT_ALLOWED_LANGUAGES if c != "en"]
+    if not allowed:
+        return None
+    want = "kn" if normalize_language(code) in _SOUNDS_LIKE_KANNADA else "hi"
+    return want if want in allowed else allowed[0]
+
+
 # ── Sarvam ────────────────────────────────────────────────────────────────────
 def _sarvam_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=settings.SARVAM_TIMEOUT)
 
 
-async def _sarvam_call(audio_bytes: bytes, mode: str) -> dict:
-    """One call to Sarvam's /speech-to-text. mode: "transcribe" or "translate"."""
+async def _sarvam_call(audio_bytes: bytes, mode: str, language_code: str = "unknown") -> dict:
+    """One call to Sarvam's /speech-to-text. mode: "transcribe" or "translate".
+
+    language_code "unknown" lets Sarvam detect the language; "kn-IN" etc. fixes it.
+    """
     if not settings.SARVAM_API_KEY:
         raise RuntimeError("Sarvam API key not set")
     async with _sarvam_client() as client:
@@ -267,7 +293,7 @@ async def _sarvam_call(audio_bytes: bytes, mode: str) -> dict:
             settings.SARVAM_URL,
             headers={"api-subscription-key": settings.SARVAM_API_KEY},
             files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-            data={"model": settings.SARVAM_MODEL, "mode": mode, "language_code": "unknown"},
+            data={"model": settings.SARVAM_MODEL, "mode": mode, "language_code": language_code},
         )
     if resp.status_code >= 400:
         raise RuntimeError(f"Sarvam HTTP {resp.status_code}: {resp.text[:200]}")
@@ -285,13 +311,27 @@ async def _transcribe_sarvam(audio_bytes: bytes) -> dict:
     data = await _sarvam_call(audio_bytes, "transcribe")
     text = (data.get("transcript") or "").strip()
     language = normalize_language(data.get("language_code"))
-    logger.info(f"Sarvam transcription: lang={language}, text_length={len(text)}")
+    sure = data.get("language_probability")
+    logger.info(f"Sarvam transcription: lang={language}, sure={sure}, text_length={len(text)}")
+
+    forced = "unknown"
+    guess = _closest_allowed(language)
+    if guess and sure is not None and float(sure) < settings.STT_UNSURE_BELOW:
+        # Not sure it heard another language: try again as the closest allowed one
+        forced = f"{guess}-IN"
+        logger.info(f"Sarvam unsure ({sure}) about lang={language}; transcribing again as {forced}")
+        data = await _sarvam_call(audio_bytes, "transcribe", forced)
+        text = (data.get("transcript") or "").strip()
+        language = guess
 
     result = {"text": text, "language": language, "provider": "sarvam"}
+    if sure is not None:
+        result["language_probability"] = sure
 
-    if text and language != "en" and settings.SARVAM_TRANSLATE:
+    # No translation for languages we will refuse anyway (saves a paid call)
+    if text and language != "en" and settings.SARVAM_TRANSLATE and is_allowed_language(language):
         try:
-            tr = await _sarvam_call(audio_bytes, "translate")
+            tr = await _sarvam_call(audio_bytes, "translate", forced)
             english = (tr.get("transcript") or "").strip()
             if english:
                 result["english_text"] = english

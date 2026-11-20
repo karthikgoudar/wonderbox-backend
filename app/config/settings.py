@@ -44,6 +44,18 @@ class Settings:
     # For non-English speech, also ask Sarvam for an English version to draw from
     SARVAM_TRANSLATE = os.getenv("SARVAM_TRANSLATE", "true").lower() == "true"
 
+    # Spoken languages a child may use (short codes, comma separated). Speech in
+    # any other language stops before the picture is made. Empty allows all.
+    STT_ALLOWED_LANGUAGES = [
+        c.strip().lower()
+        for c in os.getenv("STT_ALLOWED_LANGUAGES", "en,kn,hi").split(",")
+        if c.strip()
+    ]
+    # Sarvam gives a 0-1 score for how sure it is of the language. If it hears
+    # a language outside the list but is less sure than this, the speech is
+    # transcribed again as the closest allowed language instead of refused.
+    STT_UNSURE_BELOW = float(os.getenv("STT_UNSURE_BELOW", "0.7"))
+
     # OpenAI Whisper API (paid fallback)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # Add your OpenAI API key
     OPENAI_WHISPER_MODEL = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
