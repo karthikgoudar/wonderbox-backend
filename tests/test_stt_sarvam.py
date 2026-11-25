@@ -26,7 +26,11 @@ def sarvam(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         body = request.read()
         mode = "translate" if b'name="mode"\r\n\r\ntranslate' in body else "transcribe"
-        calls.append({"mode": mode, "key": request.headers.get("api-subscription-key"), "body": body})
+        lang = body.split(b'name="language_code"\r\n\r\n')[1].split(b"\r\n")[0].decode()
+        calls.append({"mode": mode, "lang": lang,
+                      "key": request.headers.get("api-subscription-key"), "body": body})
+        if mode == "transcribe" and lang != "unknown" and "forced" in replies:
+            return httpx.Response(200, json=replies["forced"])
         if fail["all"]:
             return httpx.Response(fail["all"], json={"error": "boom"})
         if mode == "translate" and fail["translate"]:
@@ -127,3 +131,73 @@ def test_sarvam_used_as_fallback_when_key_present(monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
     assert run(stt_service.transcribe(b"x"))["provider"] == "sarvam"
     assert log == ["groq", "sarvam"]
+
+
+# ── Allowed languages (English, Kannada, Hindi) ──────────────────────────────
+
+def test_only_english_kannada_hindi_allowed_by_default():
+    assert settings.STT_ALLOWED_LANGUAGES == ["en", "kn", "hi"]
+    ok = stt_service.is_allowed_language
+    assert all(ok(c) for c in ("en", "en-IN", "kn-IN", "hi-IN", "Hindi", "kannada", None))
+    assert not any(ok(c) for c in ("ta-IN", "te-IN", "mr-IN", "bn", "Tamil", "fr"))
+
+
+def test_empty_allowed_list_allows_every_language(monkeypatch):
+    monkeypatch.setattr(settings, "STT_ALLOWED_LANGUAGES", [])
+    assert stt_service.is_allowed_language("ta-IN")
+
+
+def test_refused_language_is_not_translated(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "எனக்கு யானை வேண்டும்", "language_code": "ta-IN"}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "ta" and "english_text" not in r
+    assert len(sarvam.calls) == 1  # no paid translate call
+
+
+# ── Unsure about another language: try again as Kannada or Hindi ─────────────
+
+def test_unsure_telugu_is_transcribed_again_as_kannada(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "garbled", "language_code": "te-IN",
+                                    "language_probability": 0.45}
+    sarvam.replies["forced"] = {"transcript": "ನನಗೆ ಆನೆ ಬೇಕು", "language_code": "kn-IN"}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "kn" and r["text"] == "ನನಗೆ ಆನೆ ಬೇಕು"
+    assert r["english_text"] == "I want an elephant"
+    assert [(c["mode"], c["lang"]) for c in sarvam.calls] == [
+        ("transcribe", "unknown"), ("transcribe", "kn-IN"), ("translate", "kn-IN")]
+
+
+def test_unsure_urdu_is_transcribed_again_as_hindi(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "x", "language_code": "ur-IN",
+                                    "language_probability": 0.5}
+    sarvam.replies["forced"] = {"transcript": "हाथी उड़ रहा है", "language_code": "hi-IN"}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "hi" and sarvam.calls[1]["lang"] == "hi-IN"
+
+
+def test_sure_telugu_is_still_refused(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "నాకు ఏనుగు కావాలి", "language_code": "te-IN",
+                                    "language_probability": 0.93}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "te" and not stt_service.is_allowed_language(r["language"])
+    assert len(sarvam.calls) == 1
+
+
+def test_no_score_means_no_second_try(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "x", "language_code": "ta-IN"}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "ta" and len(sarvam.calls) == 1
+
+
+def test_unsure_but_allowed_language_is_left_alone(sarvam):
+    sarvam.replies["transcribe"] = {"transcript": "ನನಗೆ ಆನೆ ಬೇಕು", "language_code": "kn-IN",
+                                    "language_probability": 0.3}
+    r = run(stt_service._transcribe_sarvam(b"x"))
+    assert r["language"] == "kn"
+    assert [c["lang"] for c in sarvam.calls] == ["unknown", "unknown"]  # transcribe + translate
+
+
+def test_closest_allowed():
+    c = stt_service._closest_allowed
+    assert (c("te"), c("ta-IN"), c("ml"), c("ur"), c("mr"), c("kn"), c("en")) == (
+        "kn", "kn", "kn", "hi", "hi", None, None)
