@@ -12,7 +12,7 @@ SSE event sequence
   event: progress     data: {"step": "<named_step>"}      (repeated)
   event: text         data: {"text": "...", "language": "en"}
   event: image_ready  data: {"image_url": "https://..."}
-  event: done         data: {"sticker_id": "..."}
+  event: done         data: {"sticker_id": "...", "intent": "sticker" | "story", "language": "en"}
   event: error        data: {"message": "..."}
 """
 
@@ -105,6 +105,7 @@ async def submit_sticker(
                 "sticker_id": job.get("sticker_id"),
                 "text": job.get("text"),
                 "language": job.get("language"),
+                "intent": job.get("intent", "sticker"),
                 "image_url": job.get("image_url"),
                 "print_url": job.get("print_url"),
                 "print_png_url": job.get("print_png_url"),
@@ -205,6 +206,8 @@ async def stream_sticker(job_id: str):
                 yield _sse(
                     "done",
                     {
+                        "intent": current.get("intent", "sticker"),
+                        "language": current.get("language"),
                         "sticker_id": current.get("sticker_id"),
                         "image_url": current.get("image_url"),
                         "print_url": current.get("print_url"),
