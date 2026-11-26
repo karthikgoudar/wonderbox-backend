@@ -16,6 +16,7 @@ Job dict shape
     "progress_step": str | None,
     "text":          str | None,
     "language":      str | None,
+    "intent":        "sticker" | "story",
     "image_url":     str | None,
     "sticker_id":    str | None,
     "error":         dict | None,
@@ -37,6 +38,7 @@ from app.services import (
     image_service,
     limits_service,
     prompt_builder,
+    story_intent,
     stt_service,
     translation_service,
 )
@@ -74,6 +76,7 @@ def create_job(job_id: str) -> dict:
         "progress_step": None,
         "text": None,
         "language": None,
+        "intent": "sticker",
         "image_url": None,
         "print_url": None,
         "print_png_url": None,
@@ -318,6 +321,12 @@ async def run_sticker_pipeline(
 
         _update(job_id, text=original_text, language=language)
         logger.info(f"[{job_id}] Transcript='{original_text}' language={language}")
+
+        # "Tell me a story": the device plays a story it keeps; no picture is made
+        if story_intent.is_story_request(original_text, prompt_text):
+            logger.info(f"[{job_id}] Story request (language={language}); skipping the picture")
+            _update(job_id, intent="story", status="done", progress_step=None)
+            return
 
         # if _check_cancelled(job_id, "translating"):
            # return
