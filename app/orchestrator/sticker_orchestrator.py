@@ -38,6 +38,7 @@ from app.services import (
     image_service,
     limits_service,
     prompt_builder,
+    prompt_rewrite,
     story_intent,
     stt_service,
     translation_service,
@@ -327,6 +328,11 @@ async def run_sticker_pipeline(
             logger.info(f"[{job_id}] Story request (language={language}); skipping the picture")
             _update(job_id, intent="story", status="done", progress_step=None)
             return
+
+        # English speech can hide Kannada/Hindi words (no translation ran for it)
+        if language.startswith("en"):
+            _update(job_id, progress_step="understanding")
+            prompt_text = await prompt_rewrite.rewrite(prompt_text)
 
         # if _check_cancelled(job_id, "translating"):
            # return

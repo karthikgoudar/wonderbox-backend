@@ -41,6 +41,8 @@ def pipeline(monkeypatch):
     monkeypatch.setattr(orch.stt_service, "transcribe", fake_transcribe)
     monkeypatch.setattr(orch.image_service, "generate_from_prompt", fake_image)
     monkeypatch.setattr(orch, "RETRYABLE_ATTEMPTS", 1)
+    from app.config.settings import settings
+    monkeypatch.setattr(settings, "PROMPT_REWRITE", False)   # never call a real model in tests
 
     def go(reply):
         stt_reply.clear()

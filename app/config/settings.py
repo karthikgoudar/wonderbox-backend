@@ -56,6 +56,17 @@ class Settings:
     # transcribed again as the closest allowed language instead of refused.
     STT_UNSURE_BELOW = float(os.getenv("STT_UNSURE_BELOW", "0.7"))
 
+    # English speech often hides Kannada or Hindi words ("Manga Tractory on
+    # Mars": manga = monkey). A small model rewrites it into clear English
+    # before drawing. Providers are tried in order; failures keep the words.
+    PROMPT_REWRITE = os.getenv("PROMPT_REWRITE", "true").lower() == "true"
+    PROMPT_REWRITE_PROVIDERS = [
+        p.strip().lower() for p in os.getenv("PROMPT_REWRITE_PROVIDERS", "groq,openai").split(",") if p.strip()
+    ]
+    PROMPT_REWRITE_GROQ_MODEL = os.getenv("PROMPT_REWRITE_GROQ_MODEL", "openai/gpt-oss-20b")
+    PROMPT_REWRITE_OPENAI_MODEL = os.getenv("PROMPT_REWRITE_OPENAI_MODEL", "gpt-5.4-nano")
+    PROMPT_REWRITE_TIMEOUT = float(os.getenv("PROMPT_REWRITE_TIMEOUT", "3"))
+
     # OpenAI Whisper API (paid fallback)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # Add your OpenAI API key
     OPENAI_WHISPER_MODEL = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
